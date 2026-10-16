@@ -259,13 +259,20 @@ function renderSettings(firstRun) {
   const f = (id, label, input) => el("div", { class: "field" }, [el("label", { for: id, text: label }), input]);
   const name = el("input", { type: "text", id: "set-name", maxlength: "24", value: st.puppy.name, placeholder: "e.g. Pepper" });
   const sex = el("select", { id: "set-sex" }, [el("option", { value: "girl", selected: st.puppy.sex !== "boy", text: "Girl" }), el("option", { value: "boy", selected: st.puppy.sex === "boy", text: "Boy" })]);
-  const breed = el("input", { type: "text", id: "set-breed", maxlength: "40", value: st.puppy.breed, placeholder: "e.g. German Shorthaired Pointer × heading dog" });
+  const breed = el("input", { type: "text", id: "set-breed", maxlength: "80", value: st.puppy.breed, placeholder: "e.g. German Shorthaired Pointer × heading dog" });
   const born = el("input", { type: "date", id: "set-born", value: st.puppy.born || "" });
   const start = el("input", { type: "date", id: "set-start", value: st.start || iso(today) });
+  // The browser shows date pickers in the phone's own locale (dd/mm or mm/dd), so spell the chosen date out in words underneath.
+  const dateWords = (input, empty) => {
+    const out = el("small", { class: "date-words" });
+    const draw = () => { const d = input.value ? new Date(input.value + "T12:00:00") : null; out.textContent = d && !isNaN(d) ? d.toLocaleDateString("en-NZ", { weekday: "long", day: "numeric", month: "long", year: "numeric" }) : empty; };
+    input.addEventListener("input", draw); draw(); return out;
+  };
+  const bornWords = dateWords(born, "Not set"), startWords = dateWords(start, "");
   const save = el("button", { class: "btn", type: "button", text: firstRun ? "Start training" : "Save", onclick: async () => {
     const famClean = fam.map((p) => ({ id: p.id, name: p.name.trim().slice(0, 20), role: p.role })).filter((p) => p.name);
     if (!famClean.length) { toast("Add at least one person"); return; }
-    const next = { puppy: { name: name.value.trim().slice(0, 24), sex: sex.value, breed: breed.value.trim().slice(0, 40), born: born.value }, start: start.value || iso(today), family: famClean };
+    const next = { puppy: { name: name.value.trim().slice(0, 24), sex: sex.value, breed: breed.value.trim().slice(0, 80), born: born.value }, start: start.value || iso(today), family: famClean };
     try { await store.saveSettings(next); toast("Saved"); show(firstRun ? "today" : current); } catch (e) { toast("Couldn't save. Check your connection."); }
   } });
   P.append(
@@ -275,9 +282,9 @@ function renderSettings(firstRun) {
     el("div", { class: "card", style: "display:grid;gap:12px" }, [
       f("set-name", "Puppy's name", name),
       el("div", { class: "row" }, [el("div", { class: "field", style: "flex:1;min-width:120px" }, [el("label", { for: "set-sex", text: "Girl or boy" }), sex]),
-        el("div", { class: "field", style: "flex:2;min-width:160px" }, [el("label", { for: "set-born", text: "Birthday (roughly)" }), born])]),
+        el("div", { class: "field", style: "flex:2;min-width:160px" }, [el("label", { for: "set-born", text: "Birthday (roughly)" }), born, bornWords])]),
       f("set-breed", "Breed", breed),
-      f("set-start", "Plan starts", start)
+      el("div", { class: "field" }, [el("label", { for: "set-start", text: "Plan starts" }), start, startWords])
     ]),
     el("div", { class: "eyebrow", text: "Who's training" }),
     el("div", { class: "card", style: "display:grid;gap:10px" }, [famBox, addBtn,

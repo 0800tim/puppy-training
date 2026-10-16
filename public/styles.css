@@ -238,3 +238,5 @@ button.vid{width:100%;border:0;font:inherit;text-align:left;cursor:pointer}
 .player-meta small{color:#d9c9c0;font-size:.8rem}
 .player-meta a{color:#ffb38a;white-space:nowrap;font-size:.85rem}
 .player-close{position:fixed;top:calc(10px + env(safe-area-inset-top,0px));right:max(12px,env(safe-area-inset-right,0px));width:44px;height:44px;border-radius:50%;border:0;background:rgba(255,255,255,.16);color:#fff;font-size:1.2rem;cursor:pointer}
+
+.date-words{display:block;margin-top:4px;color:var(--muted);font-size:.8rem}

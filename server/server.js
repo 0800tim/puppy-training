@@ -107,7 +107,7 @@ function createApp(opts = {}) {
       .filter((m) => /^[A-Za-z0-9]{1,24}$/.test(m.id) && m.name);
     if (!family.length) return null;
     return {
-      puppy: { name: str(p.name, 24), sex: p.sex === "boy" ? "boy" : "girl", breed: str(p.breed, 40), born: DATE_RE.test(p.born) ? p.born : "" },
+      puppy: { name: str(p.name, 24), sex: p.sex === "boy" ? "boy" : "girl", breed: str(p.breed, 80), born: DATE_RE.test(p.born) ? p.born : "" },
       start: DATE_RE.test(x.start) ? x.start : new Date().toISOString().slice(0, 10),
       family
     };
