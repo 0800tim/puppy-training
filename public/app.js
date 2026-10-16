@@ -374,7 +374,7 @@ function renderSettings(firstRun) {
         el("input", { type: "text", id: "fam-" + p.id, maxlength: "20", placeholder: "Name", value: p.name, "aria-label": "Name", oninput: (e) => (p.name = e.target.value) }),
         el("div", { class: "row" }, [kindSel(p), p.kind === "kid" ? ageSel(p) : null,
           el("label", { class: "target" }, ["Goal ", el("input", { type: "number", min: "1", max: "30", value: p.target || C.kinds[p.kind].target, "aria-label": "Sessions a week", oninput: (e) => { p.target = Number(e.target.value); p.touched = true; } }), " a week"])]),
-        isAdult(me()) && store.mode === "server" ? el("div", { class: "row" }, [
+        (isAdult(me()) || !family().some(isAdult)) && store.mode === "server" ? el("div", { class: "row" }, [
           el("input", { type: "tel", placeholder: "Mobile (for texts)", value: p.phone || "", "aria-label": "Mobile number", style: "flex:1;min-width:150px", oninput: (e) => (p.phone = e.target.value) }),
           el("label", { class: "target" }, [el("input", { type: "checkbox", checked: !!p.sms, onchange: (e) => (p.sms = e.target.checked) }), " text " + (p.name || "them")])]) : null
       ]),
