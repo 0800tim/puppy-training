@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
-# Daily copy of the family chart (data/store.json) with a date stamp.
-# Keeps 30 days. secret.key is copied once, as it never changes (changing it
-# would sign every phone out).
+# Daily copy of each slot's chart (store.json) and photo with a date stamp. Keeps 30 days.
+# secret.key is copied once per slot, as it never changes (changing it would sign every phone out).
 set -euo pipefail
-SRC=/srv/projects/internal/puppy-training/data
 DEST=/srv/backups/puppy-training
 mkdir -p "$DEST"
-if [ -f "$SRC/store.json" ]; then
-  cp -p "$SRC/store.json" "$DEST/store-$(date +%Y-%m-%d).json"
-fi
-[ -f "$SRC/secret.key" ] && [ ! -f "$DEST/secret.key" ] && cp -p "$SRC/secret.key" "$DEST/secret.key" && chmod 600 "$DEST/secret.key"
+for slot in prod demo dev; do
+  case $slot in prod) SRC=/srv/projects/internal/puppy-training-prod/data;; demo) SRC=/srv/projects/internal/puppy-training-demo/data;; dev) SRC=/srv/projects/internal/puppy-training/data;; esac
+  [ -d "$SRC" ] || continue
+  [ -f "$SRC/store.json" ] && cp -p "$SRC/store.json" "$DEST/store-$slot-$(date +%Y-%m-%d).json"
+  [ -f "$SRC/photo.jpg" ] && cp -p "$SRC/photo.jpg" "$DEST/photo-$slot.jpg"
+  [ -f "$SRC/secret.key" ] && [ ! -f "$DEST/secret-$slot.key" ] && cp -p "$SRC/secret.key" "$DEST/secret-$slot.key" && chmod 600 "$DEST/secret-$slot.key"
+done
 find "$DEST" -name 'store-*.json' -mtime +30 -delete
 echo "$(date -Is) backed up to $DEST ($(ls "$DEST" | grep -c '^store-') copies kept)"
