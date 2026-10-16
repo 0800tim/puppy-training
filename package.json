@@ -1,0 +1,15 @@
+{
+  "name": "puppy-training",
+  "version": "1.0.0",
+  "description": "Puppy School HQ: a free family puppy training plan and tick-off chart. Mobile-first, works offline, optional PIN-protected family sync.",
+  "license": "MIT",
+  "private": false,
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "start": "node server/server.js",
+    "test": "node --test test/server.test.js",
+    "build": "node scripts/build-single.mjs"
+  },
+  "repository": { "type": "git", "url": "https://github.com/0800tim/puppy-training.git" },
+  "keywords": ["puppy", "dog training", "family", "chore chart", "pwa", "self-hosted"]
+}

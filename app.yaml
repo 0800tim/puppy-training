@@ -1,0 +1,17 @@
+# Google App Engine (standard) — static hosting of the app.
+# Ticks save on each phone (no family sync, no PIN). For a shared family chart, self-host server/server.js.
+#   gcloud app deploy --project YOUR_PROJECT
+runtime: python312
+handlers:
+  - url: /
+    static_files: public/index.html
+    upload: public/index.html
+    secure: always
+    http_headers:
+      Cache-Control: no-cache
+  - url: /(.*\.(js|css|svg|webmanifest|png|ico))$
+    static_files: public/\1
+    upload: public/.*\.(js|css|svg|webmanifest|png|ico)$
+    secure: always
+    http_headers:
+      Cache-Control: no-cache

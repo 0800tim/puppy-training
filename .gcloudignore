@@ -1,0 +1,13 @@
+# App Engine only needs the static files in public/
+.git/
+.gitignore
+node_modules/
+data/
+dist/
+server/
+test/
+scripts/
+deploy/
+Dockerfile
+docker-compose.yml
+*.md

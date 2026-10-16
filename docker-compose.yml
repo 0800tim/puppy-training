@@ -1,0 +1,13 @@
+services:
+  puppy-training:
+    build: .
+    container_name: puppy-training
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"   # put a reverse proxy or tunnel in front for HTTPS
+    environment:
+      PUPPY_PIN: "${PUPPY_PIN:?set PUPPY_PIN in .env}"
+      TRUST_PROXY: "1"
+      SESSION_DAYS: "180"
+    volumes:
+      - ./data:/data

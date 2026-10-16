@@ -1,0 +1,21 @@
+# systemd unit — copy to /etc/systemd/system/, edit paths, then:
+#   sudo systemctl daemon-reload && sudo systemctl enable --now puppy-training
+[Unit]
+Description=Puppy School HQ
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=puppy
+WorkingDirectory=/opt/puppy-training
+EnvironmentFile=/etc/puppy-training.env
+ExecStart=/usr/bin/node server/server.js
+Restart=on-failure
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/puppy-training/data
+
+[Install]
+WantedBy=multi-user.target
