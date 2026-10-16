@@ -55,7 +55,7 @@ function T(str) {
 }
 
 /* ---------- state ---------- */
-const S = { settings: null, ticks: {}, logs: {}, mastery: {}, toilet: [], photo: false, scores: null, push: [], sms: false, vapid: "" };
+const S = { settings: null, ticks: {}, logs: {}, mastery: {}, toilet: [], photo: false, scores: null, push: [], sms: false, vapid: "", social: {} };
 let store = null;
 let viewDay = new Date(today);
 let staticKey = "";
@@ -104,10 +104,11 @@ class LocalStore {
     S.settings = lsGet("pt.settings", null);
     const t = lsGet("pt.ticks", {}); S.ticks = Array.isArray(t) ? Object.fromEntries(t.map((k) => [k, { at: 0 }])) : t;
     S.logs = lsGet("pt.logs", {}); S.mastery = lsGet("pt.mastery", {}); S.toilet = lsGet("pt.toilet", []);
-    S.photo = !!lsGet("pt.photo", null);
+    S.photo = !!lsGet("pt.photo", null); S.social = lsGet("pt.social", {});
     cb();
   }
-  save() { lsSet("pt.settings", S.settings); lsSet("pt.ticks", S.ticks); lsSet("pt.logs", S.logs); lsSet("pt.mastery", S.mastery); lsSet("pt.toilet", S.toilet); this.cb(); }
+  save() { lsSet("pt.settings", S.settings); lsSet("pt.ticks", S.ticks); lsSet("pt.logs", S.logs); lsSet("pt.mastery", S.mastery); lsSet("pt.toilet", S.toilet); lsSet("pt.social", S.social); this.cb(); }
+  async setSocial(item, by, mood, on) { const L = (S.social[item] || []).filter((x) => x.by !== by); if (on !== false) L.push({ by, mood, at: Date.now() }); S.social[item] = L; this.save(); }
   async saveSettings(x) { S.settings = x; this.save(); }
   async setTick(k, on, extra) { if (on) S.ticks[k] = Object.assign({ at: Date.now() }, extra || {}); else delete S.ticks[k]; this.save(); }
   async setLog(date, v) { if (v.bite) S.logs[date] = v; else delete S.logs[date]; this.save(); }
@@ -125,7 +126,7 @@ class ServerStore {
     this.rev = j.rev;
     S.settings = j.settings || null;
     S.ticks = j.ticks || {}; S.logs = j.logs || {}; S.mastery = j.mastery || {}; S.toilet = j.toilet || [];
-    S.push = j.push || []; S.sms = !!j.sms; S.vapid = j.vapid || "";
+    S.push = j.push || []; S.sms = !!j.sms; S.vapid = j.vapid || ""; S.social = j.social || {};
     if (j.photo !== S.photo) { S.photo = !!j.photo; this.photoBust = Date.now(); }
     this.cb();
   }
@@ -164,6 +165,7 @@ class ServerStore {
   }
   async setLog(date, v) { if (v.bite) S.logs[date] = v; else delete S.logs[date]; this.cb(); return this.write("PUT", "api/logs/" + date, v); }
   setMastery(skill, by, witness, on) { return this.write("PUT", "api/mastery/" + skill, { by, witness, on }); }
+  setSocial(item, by, mood, on) { return this.write("PUT", "api/social/" + item, { by, mood, on }); }
   addToilet(x) { return this.write("POST", "api/toilet", x); }
   voidToilet(id) { return this.write("DELETE", "api/toilet/" + id); }
   setPhoto(data) { return data ? this.write("PUT", "api/photo", { data }) : this.write("DELETE", "api/photo"); }
@@ -884,7 +886,7 @@ function renderSkills() {
   P.append(el("details", { class: "acc" }, [el("summary", {}, el("div", { class: "nm" }, [el("h3", { text: "The 6-week plan" }), el("small", { text: "If you like a map. Nothing here is a gate." })])),
     el("div", { class: "acc-body" }, C.weeks.map((w, i) => {
       const s = addDays(startDate(), i * 7), e = addDays(s, 6);
-      const age = born ? " · " + Math.floor((s - born) / 864e5 / 7) + " weeks old" : "";
+      const age = born ? " · " + Math.floor(Math.round((s - born) / 864e5) / 7) + " weeks old" : "";
       return el("article", { class: "card wk" + (i === ci ? " current" : "") }, [
         el("header", {}, [el("h3", { text: "Week " + (i + 1) + ": " + w.title }), el("span", { class: "dates", text: short(s) + " – " + short(e) + age })]),
         el("div", { class: "chips" }, w.skills.map((id) => { const sk = skillById(id); return sk ? el("button", { class: "chip", text: T(sk.nm), onclick: () => openAcc("sk-" + id, "skills") }) : null; })),
@@ -911,9 +913,59 @@ function renderSkills() {
   P.append(el("div", { class: "callout danger" }, [el("b", { text: "Never give these" }), el("p", { text: C.treats.never })]));
   P.append(el("div", { class: "eyebrow", text: "House rules" }));
   P.append(el("div", { class: "card" }, el("ul", { class: "plain" }, C.rules.map((x) => el("li", { text: T(x) })))));
-  P.append(el("div", { class: "eyebrow", text: "Safe socialising before vaccinations finish" }));
-  P.append(el("div", { class: "card" }, [el("p", { class: "note", style: "margin-bottom:8px", text: T("Ages 8 to 16 weeks are when she decides what's normal. Keep her paws off public ground until the vet says so, but carry her into the world. One new thing a day.") }),
-    el("ul", { class: "plain" }, C.social.map((x) => el("li", { text: x })))]));
+  renderSocial(P);
+  renderTimeline(P);
+}
+
+/* ---------- socialisation checklist ---------- */
+function renderSocial(P) {
+  const m = me();
+  const total = C.socialGroups.reduce((a, g) => a + g.items.length, 0);
+  const happy = S.scores ? S.scores.socialHappy : 0;
+  P.append(el("div", { class: "eyebrow", text: "Socialising: " + happy + " of " + total + " met happily" }));
+  P.append(el("div", { class: "card focus" }, [el("h2", { class: "h2", text: T("Everything she meets before 14 weeks becomes normal") }),
+    el("p", { class: "note", style: "margin-top:6px", text: T("Keep her paws off public ground until the vet says so, but carry her into the world: one new thing a day, always with food. Tap an item, say how she took it. Whoever was there gets the points; a happy first meeting feeds her progress.") }),
+    bar(total ? (happy / total) * 100 : 0, "")]));
+  C.socialGroups.forEach((g) => {
+    const doneN = g.items.filter((it, i) => (S.social[g.id + ":" + i] || []).some((x) => !x.void)).length;
+    const body = el("div", { class: "acc-body social" });
+    g.items.forEach((it, i) => {
+      const key = g.id + ":" + i; const L = (S.social[key] || []).filter((x) => !x.void);
+      const mine = m && L.find((x) => x.by === m.id);
+      const best = L.some((x) => x.mood === "happy") ? "happy" : L.some((x) => x.mood === "unsure") ? "unsure" : L.length ? "scared" : "";
+      const row = el("div", { class: "srow " + best });
+      const label = el("button", { class: "sname", type: "button", "aria-expanded": "false", text: (best === "happy" ? "😊 " : best === "unsure" ? "😐 " : best === "scared" ? "😟 " : "○ ") + T(it) });
+      const who = L.length ? el("small", { class: "muted", text: L.map((x) => (person(x.by) ? person(x.by).name : "?") + " " + (C.socialMoods.find((mm) => mm[0] === x.mood) || ["", ""])[1].slice(0, 2)).join(" · ") }) : null;
+      const moods = el("div", { class: "chips", hidden: true }, C.socialMoods.map(([k, l]) => el("button", { class: "chip" + (mine && mine.mood === k ? " on" : ""), type: "button", text: l, onclick: () => {
+        if (!m) { renderWho(); return; }
+        safe(() => store.setSocial(key, m.id, k, !(mine && mine.mood === k)), mine && mine.mood === k ? "Removed" : k === "happy" ? "Logged. Good " + T("girl") + "!" : k === "unsure" ? "Logged. Try again another day, from further away." : "Logged. No pushing: distance and food next time.");
+      } })));
+      label.addEventListener("click", () => { moods.hidden = !moods.hidden; label.setAttribute("aria-expanded", String(!moods.hidden)); });
+      row.append(label); if (who) row.append(who); row.append(moods); body.append(row);
+    });
+    P.append(el("details", { class: "acc", id: "soc-" + g.id }, [el("summary", {}, [el("span", { class: "ico", "aria-hidden": "true", text: g.e }), el("div", { class: "nm" }, [el("h3", { text: g.nm }), el("small", { text: doneN + " of " + g.items.length + " met" })])]), body]));
+  });
+  P.append(el("p", { class: "note", text: T(C.socialNote) }));
+}
+
+/* ---------- the first year, dated from her birthday, and breed notes ---------- */
+function renderTimeline(P) {
+  const born = S.settings && parseIso(S.settings.puppy.born);
+  const ageWk = born ? Math.floor(Math.round((today - born) / 864e5) / 7) : null;
+  P.append(el("div", { class: "eyebrow", text: pupName() + "'s first year" }));
+  const cur = ageWk == null ? -1 : C.timeline.reduce((best, t, i) => (t.wk <= ageWk ? i : best), -1);
+  P.append(el("div", { class: "tl" }, C.timeline.map((t, i) => {
+    const d = born ? addDays(born, t.wk * 7) : null;
+    const state = i === cur ? "now" : i < cur ? "past" : "";
+    return el("div", { class: "tli " + state }, [el("div", { class: "tlw" }, [el("b", { text: t.wk + " wk" }), d ? el("small", { text: short(d) }) : null]), el("div", { class: "tlb" }, [el("b", { text: t.nm + (i === cur ? " (now)" : "") }), el("p", { class: "note", text: T(t.body) })])]);
+  })));
+  if (!born) P.append(el("p", { class: "note", text: "Add " + T("her") + " birthday in Settings and this becomes a dated plan." }));
+  const breed = ((S.settings && S.settings.puppy.breed) || "").toLowerCase();
+  const notes = C.breedNotes.filter((n) => new RegExp(n.match, "i").test(breed));
+  if (notes.length) {
+    P.append(el("div", { class: "eyebrow", text: "About " + T("her") + " mix" }));
+    notes.forEach((n) => P.append(el("div", { class: "card" }, [el("b", { text: n.nm }), el("p", { class: "note", style: "margin-top:4px", text: T(n.body) })])));
+  }
 }
 
 /* ---------- help ---------- */
@@ -976,7 +1028,9 @@ function renderWatch() {
 /* ---------- render ---------- */
 function renderAll() {
   [["today", renderToday], ["skills", renderSkills], ["pack", renderPack]].forEach(([name, fn]) => {
-    try { fn(); } catch (e) { console.error(name, e); $("#p-" + name).replaceChildren(el("p", { class: "note", text: "This section hit a snag: " + (e && e.message) + ". Pull to refresh; if it stays, tell Tim." })); }
+    const open = [...document.querySelectorAll("#p-" + name + " details[open][id]")].map((d) => d.id);
+    const y = window.scrollY;
+    try { fn(); open.forEach((id) => { const d = document.getElementById(id); if (d) d.open = true; }); if (current === name) window.scrollTo(0, y); } catch (e) { console.error(name, e); $("#p-" + name).replaceChildren(el("p", { class: "note", text: "This section hit a snag: " + (e && e.message) + ". Pull to refresh; if it stays, tell Tim." })); }
   });
 }
 function onState() {

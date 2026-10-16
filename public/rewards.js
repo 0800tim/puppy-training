@@ -168,7 +168,10 @@
       const toiletByDay = {}; toilet.forEach((t) => { if (t.by === p.id) { const x = iso(new Date(t.at)); toiletByDay[x] = (toiletByDay[x] || 0) + 1; } });
       let toiletPts = 0, toiletN = 0; for (const x in toiletByDay) { toiletN += toiletByDay[x]; toiletPts += Math.min(P.toiletCap, toiletByDay[x] * P.toilet); }
       points += toiletPts;
-      people[p.id] = { id: p.id, kind, target, points, streak, atRisk, usedFreeze, freezesLeft: Math.max(0, 2 - freezesThisWeek), bestStreak: best, comeback,
+      let socialN = 0; const social = state.social || {};
+      for (const item in social) { const L = (social[item] || []).filter((x) => !x.void); if (L.some((x) => x.by === p.id)) socialN++; }
+      points += socialN * (P.social || 5);
+      people[p.id] = { socialN, id: p.id, kind, target, points, streak, atRisk, usedFreeze, freezesLeft: Math.max(0, 2 - freezesThisWeek), bestStreak: best, comeback,
         weekSessions, weekByDay, weekPct: Math.min(100, Math.round((weekSessions / target) * 100)), bestWeek, perfectWeek, today: dayCount[todayS] || 0,
         early, owl, hattricks, confirmed: [...confirmed], rated, toiletN, badges: [] };
     });
@@ -200,14 +203,17 @@
     const todayToilet = tByDay[todayS] || [];
     const lastOut = toilet.filter((t) => t.kind !== "accident").sort((a, b) => b.at - a.at)[0] || null;
     const accidentsAfter = {}; toilet.forEach((t) => { if (t.kind === "accident" && t.before) accidentsAfter[t.before] = (accidentsAfter[t.before] || 0) + 1; });
-    const ageWeeks = settings.puppy && settings.puppy.born ? Math.floor((parseIso(todayS) - parseIso(settings.puppy.born)) / 864e5 / 7) : 12;
+    const ageWeeks = settings.puppy && settings.puppy.born ? Math.floor(Math.round((parseIso(todayS) - parseIso(settings.puppy.born)) / 864e5) / 7) : 12;
     let interval = 60; (C.toiletInterval || []).some(([w, m]) => { if (ageWeeks < w) { interval = m; return true; } return false; });
     const toiletPuppy = Object.values(tByDay).reduce((a, L) => a + Math.min(PP.toiletCap, L.filter((t) => t.kind !== "accident").length * PP.toilet), 0);
 
+    // socialisation (first happy tick of each item feeds the puppy meter)
+    const socialAll = state.social || {};
+    let socialHappy = 0; for (const item in socialAll) { if ((socialAll[item] || []).some((x) => !x.void && x.mood === "happy")) socialHappy++; }
     // puppy meter
     const masteredN = C.skills.filter((s) => st[s.id].mastered).length;
     const sessionsAll = Object.values(people).reduce((a, p) => a + Object.values(p.weekByDay).length * 0, 0) + allDays.reduce((a, d) => a + (days[d] ? Object.values(days[d]).reduce((x, m) => x + m.n, 0) : 0), 0);
-    const puppyPts = sessionsAll * PP.session + masteredN * PP.mastery + calmDays * PP.calmDay + packDays * PP.packDay + toiletPuppy;
+    const puppyPts = sessionsAll * PP.session + masteredN * PP.mastery + calmDays * PP.calmDay + packDays * PP.packDay + toiletPuppy + socialHappy * (PP.social || 10);
     const puppy = { points: puppyPts, level: levelOf(puppyPts, C.puppyLevels), mastered: masteredN, total: C.skills.length, sessions: sessionsAll, calmDays };
 
     // badges
@@ -234,6 +240,8 @@
       if (shark) b.push("shark");
       if (me.toiletN >= 20) b.push("toilet20");
       if (dryDay) b.push("dryday");
+      if (socialHappy >= 10) b.push("social10");
+      if (socialHappy >= 40) b.push("social40");
       if (packBest >= 7) b.push("pack7");
       me.level = levelOf(me.points, C.levels);
       if (me.level.n >= 10) b.push("principal");
@@ -264,7 +272,7 @@
     return {
       today: todayS, people, skills: st, challenge,
       pack: { streak: packStreak, best: packBest, days: packDays, weekSessions: fam.reduce((a, p) => a + people[p.id].weekSessions, 0), weekTarget: fam.reduce((a, p) => a + people[p.id].target, 0) },
-      puppy, biteWeek, calmDays,
+      puppy, biteWeek, calmDays, socialHappy,
       toilet: { today: todayToilet, lastOut, interval, accidentsAfter, ageWeeks },
       missions: missions(state, C, todayS)
     };

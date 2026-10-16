@@ -46,6 +46,8 @@ const AGES = new Set(["", "5-7", "8-9", "10-11", "12-14", "15+"]);
 const SKILL_IDS = new Set(CONTENT.skills.map((s) => s.id));
 const TOILET_KINDS = new Set(CONTENT.toiletKinds.map((k) => k[0]));
 const TOILET_BEFORE = new Set(CONTENT.toiletBefore.map((k) => k[0]));
+const SOCIAL_ITEMS = new Set(CONTENT.socialGroups.flatMap((g) => g.items.map((it, i) => g.id + ":" + i)));
+const SOCIAL_MOODS = new Set(CONTENT.socialMoods.map((m) => m[0]));
 const localToday = () => { const d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); };
 
 function createApp(opts = {}) {
@@ -98,7 +100,7 @@ function createApp(opts = {}) {
 
   /* ---------- store ---------- */
   const storeFile = path.join(dataDir, "store.json");
-  let db = { rev: 1, settings: null, ticks: {}, logs: {}, mastery: {}, toilet: [], push: [], sent: null };
+  let db = { rev: 1, settings: null, ticks: {}, logs: {}, mastery: {}, toilet: [], push: [], sent: null, social: {} };
   if (fs.existsSync(storeFile)) { try { db = Object.assign(db, JSON.parse(fs.readFileSync(storeFile, "utf8"))); } catch (e) { log("store.json unreadable, starting fresh:", e.message); } }
   function persist(bump = true) {
     if (bump) db.rev++;
@@ -107,7 +109,7 @@ function createApp(opts = {}) {
     fs.renameSync(tmp, storeFile);
   }
   const photoFile = path.join(dataDir, "photo.jpg");
-  const stateOut = () => ({ rev: db.rev, settings: db.settings, ticks: db.ticks, logs: db.logs, mastery: db.mastery, toilet: db.toilet.slice(-300), photo: fs.existsSync(photoFile), today: localToday(),
+  const stateOut = () => ({ rev: db.rev, settings: db.settings, ticks: db.ticks, logs: db.logs, mastery: db.mastery, toilet: db.toilet.slice(-300), social: db.social || {}, photo: fs.existsSync(photoFile), today: localToday(),
     push: (db.push || []).map((s) => ({ id: s.id, pid: s.pid, prefs: s.prefs || {}, created: s.created, label: s.label || "" })), sms: !!smsSender, vapid: vapid.publicKey });
   /* ---------- push keys, notifier ---------- */
   const vapidFile = path.join(dataDir, "vapid.json");
@@ -230,6 +232,17 @@ function createApp(opts = {}) {
         if (!witness || witness.id === by.id) return send(res, 400, { error: "Needs a witness who isn't you" });
         entry.done.push({ by: by.id, witness: witness.id, at: now() });
       }
+      persist(); return send(res, 200, stateOut());
+    }
+    if ((m = p.match(/^\/api\/social\/([a-z]+:\d+)$/)) && req.method === "PUT") {
+      if (!SOCIAL_ITEMS.has(m[1])) return send(res, 400, { error: "Unknown item" });
+      const body = await readJson(req);
+      const by = member(body.by);
+      if (!by) return send(res, 400, { error: "Who's logging?" });
+      db.social = db.social || {};
+      const L = (db.social[m[1]] = db.social[m[1]] || []).filter((x) => x.by !== by.id);
+      if (body.on !== false) { if (!SOCIAL_MOODS.has(body.mood)) return send(res, 400, { error: "How did it go?" }); L.push({ by: by.id, mood: body.mood, at: now() }); }
+      db.social[m[1]] = L;
       persist(); return send(res, 200, stateOut());
     }
     if (p === "/api/toilet" && req.method === "POST") {

@@ -346,3 +346,21 @@ button.vid{width:100%;border:1px solid var(--line);font:inherit;text-align:left;
 .cropper{position:fixed;inset:0;z-index:25;background:rgba(10,6,24,.94);display:grid;place-content:center;gap:14px;padding:16px;color:#fff;text-align:center}
 .cropper p{margin:0;color:#cfc8ff;font-size:.9rem}
 .cropper canvas{touch-action:none;border-radius:12px;background:#000;display:block;margin:0 auto;cursor:grab}
+
+/* socialisation */
+.acc-body.social{gap:6px}
+.srow{display:grid;gap:4px;padding:6px 0;border-bottom:1px solid var(--line)}
+.srow:last-child{border-bottom:0}
+.sname{border:0;background:none;text-align:left;font:inherit;color:var(--ink);padding:4px 0;cursor:pointer}
+.srow.happy .sname{color:var(--good);font-weight:700}
+.srow.unsure .sname{color:var(--warn)}
+.srow.scared .sname{color:var(--bad)}
+/* timeline */
+.tl{display:grid;gap:8px}
+.tli{display:grid;grid-template-columns:64px minmax(0,1fr);gap:10px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:10px 12px;opacity:.75}
+.tli.now{opacity:1;border:2px solid var(--accent);box-shadow:var(--shadow)}
+.tli.past{opacity:.55}
+.tlw b{display:block;font-family:var(--font-display);font-size:.95rem}
+.tlw small{color:var(--muted);font-size:.75rem}
+.tlb b{font-family:var(--font-display)}
+.tlb p{margin-top:2px}

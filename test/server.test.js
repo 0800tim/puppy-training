@@ -102,6 +102,16 @@ test("right PIN unlocks; ticks, logs and settings persist", async () => {
     const del = await call("DELETE", "/api/toilet/" + tl.json.toilet[0].id, undefined, cookie);
     assert.equal(del.json.toilet[0].void, true);
 
+    // socialisation: one entry per person per item, with a mood
+    assert.equal((await call("PUT", "/api/social/people:0", { by: "p1", mood: "thrilled" }, cookie)).status, 400);
+    assert.equal((await call("PUT", "/api/social/nope:9", { by: "p1", mood: "happy" }, cookie)).status, 400);
+    const so = await call("PUT", "/api/social/people:0", { by: "p1", mood: "happy" }, cookie);
+    assert.equal(so.json.social["people:0"].length, 1);
+    await call("PUT", "/api/social/people:0", { by: "p1", mood: "unsure" }, cookie);
+    const so2 = await call("GET", "/api/state", undefined, cookie);
+    assert.equal(so2.json.social["people:0"].length, 1, "re-logging replaces, never doubles");
+    assert.equal(so2.json.social["people:0"][0].mood, "unsure");
+
     // puppy photo: JPEG data URL in, image out
     assert.equal((await call("GET", "/api/photo", undefined, cookie)).status, 404);
     assert.equal((await call("PUT", "/api/photo", { data: "data:image/png;base64,AAAA" }, cookie)).status, 400);

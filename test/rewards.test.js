@@ -27,11 +27,13 @@ test("points, streaks, freezes and badges from a fortnight of ticks", () => {
   const logs = { "2026-10-05": { bite: 1, by: "a" }, "2026-10-06": { bite: 2, by: "a" }, "2026-10-07": { bite: 2, by: "b" }, "2026-10-10": { bite: 5, by: "a" } };
   const mastery = { sit: { done: [{ by: "a", witness: "m", at: 1 }, { by: "b", witness: "a", at: 2 }, { by: "m", witness: "a", at: 3 }] }, yes: { done: [{ by: "a", witness: "b", at: 1 }, { by: "b", witness: "a", at: 1 }, { by: "m", witness: "a", at: 1 }] } };
   const toilet = [{ id: "1", at: at("2026-10-05", 8), kind: "wee", before: "woke", by: "b" }, { id: "2", at: at("2026-10-05", 12), kind: "poo", before: "ate", by: "b" }, { id: "3", at: at("2026-10-06", 9), kind: "accident", before: "played", by: "a" }];
-  const S = R.compute({ settings, ticks, logs, mastery, toilet }, C, { today: "2026-10-19" });
+  const social = { "people:0": [{ by: "a", mood: "happy", at: 1 }, { by: "b", mood: "unsure", at: 1 }], "sounds:2": [{ by: "a", mood: "scared", at: 1 }] };
+  const S = R.compute({ settings, ticks, logs, mastery, toilet, social }, C, { today: "2026-10-19" });
 
   const ava = S.people.a, ben = S.people.b, mum = S.people.m;
   // Ava: 27 sessions, one logged by Mum (8 instead of 10), 9 full days, 2 confirmations, 4 witnessings, 3 bite ratings, 1 toilet log
-  assert.equal(ava.points, 26 * 10 + 8 + 9 * 5 + 2 * 30 + 4 * 10 + 3 * 2 + 2, "sessions, full days, 2 confirmations, 4 witnessings, 3 ratings, 1 toilet log");
+  assert.equal(ava.points, 26 * 10 + 8 + 9 * 5 + 2 * 30 + 4 * 10 + 3 * 2 + 2 + 2 * 5, "sessions, full days, 2 confirmations, 4 witnessings, 3 ratings, 1 toilet log, 2 social items");
+  assert.equal(S.socialHappy, 1, "only happy ticks feed the puppy meter");
   assert.equal(ava.bestStreak, 9);
   assert.equal(ava.streak, 0, "Ava stopped 6 days ago, two freezes don't cover it");
   assert.equal(ava.hattricks, 9);
@@ -45,6 +47,7 @@ test("points, streaks, freezes and badges from a fortnight of ticks", () => {
   assert.ok(ben.badges.includes("toilet20") === false);
   assert.equal(ben.toiletN, 2);
   assert.equal(mum.points, 2 * 30 + 1 * 10, "Mum confirmed sit and yes, witnessed once, never trained");
+  assert.equal(ben.points, 10 * 10 + 2 * 30 + 1 * 10 + 1 * 2 + 2 * 2 + 1 * 5, "Ben: 10 sessions, 2 confirmations, 1 witnessing, 1 rating, 2 toilet logs, 1 social item");
   // skill tree: sit and yes mastered, down is open, stay open, leaveit locked (needs iyc)
   assert.equal(S.skills.sit.mastered, true);
   assert.equal(S.skills.down.open, true);
@@ -54,7 +57,7 @@ test("points, streaks, freezes and badges from a fortnight of ticks", () => {
   assert.equal(S.puppy.sessions, 37);
   assert.equal(S.puppy.mastered, 2);
   assert.equal(S.calmDays, 3);
-  assert.equal(S.puppy.points, 37 * 10 + 2 * 50 + 3 * 20 + 0 + 2 * 2);
+  assert.equal(S.puppy.points, 37 * 10 + 2 * 50 + 3 * 20 + 0 + 2 * 2 + 1 * 10);
   assert.ok(S.puppy.level.n >= 2);
   // pack badges
   assert.ok(ava.badges.includes("calm3"), "three calm days in a row is a pack badge");

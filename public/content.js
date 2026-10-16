@@ -61,10 +61,10 @@ const PUPPY_CONTENT = {
     "No rough play, no pushing her face away with your hands, no wrestling. It teaches her that hands are toys.",
     "Biting? Swap a toy in. Still biting? Calmly say \"Uh-oh\" and step behind the gate for 30 seconds.",
     "Toilet her straight after waking, eating, playing and every training session.",
-    "Puppies need 18 to 20 hours of sleep a day. A wild, bitey puppy usually needs a nap, not more play.",
+    "Puppies need lots of sleep, and most of the worst biting happens when she is over-tired. About an hour up, then a nap in the pen with a chew. A wild, bitey puppy usually needs a nap, not more play.",
     "Kids and puppy together only with an adult in the room for now.",
     "If she lifts the gate latch, clip it shut with a carabiner or cable tie.",
-    "Short walks only until she's grown. Brain games tire her out more safely than long runs."
+    "Until she is about a year old: self-paced play on grass, short sniffy walks, no stairs before 3 months, and no forced running, jumping or ball-thrower marathons. Brain games tire her out more safely than long runs."
   ],
 
   social: [
@@ -134,7 +134,7 @@ const PUPPY_CONTENT = {
         "It usually eases as her adult teeth come in, around 4 to 6 months. Your job now is to teach a soft mouth and give her better things to bite."],
       v: ["cMXTH8RvfaA", "6vrPDMc-I-k"] },
     { id: "tired", nm: "The over-tired, witching-hour puppy", tag: "Biggest cause", body: [
-        "Most bad biting happens when she's tired, usually in the evening. Puppies her age need 18 to 20 hours of sleep.",
+        "Most bad biting happens when she's tired, usually in the evening. The popular 18-to-20-hours figure is not well supported, but the pattern is: nap skipped, then shark.",
         "Rough guide: about 1 hour awake, then 1 to 2 hours asleep in her pen or crate with a chew.",
         "If the biting gets harder and she's zooming, don't play more. Toilet, then nap. Treat the pen as a nap spot, not a punishment."],
       do: ["Plan a nap before the evening chaos.", "Give a lick mat or stuffed chew toy in the pen to help her wind down."],
@@ -405,8 +405,8 @@ const PUPPY_CONTENT = {
   /* ---------- rewards: levels, badges, points (see docs/REWARDS.md) ---------- */
   kinds: { kid: { name: "Kid", target: 21 }, adult: { name: "Grown-up", target: 10 } },
   slotWindows: { am: [5.5, 12], pm: [12, 17.5], ev: [17.5, 22] },
-  points: { session: 10, sessionOther: 8, fullDay: 5, mastery: 30, witness: 10, bite: 2, toilet: 2, toiletCap: 10, packDay: 5 },
-  puppyPoints: { session: 10, mastery: 50, calmDay: 20, packDay: 10, toilet: 2, toiletCap: 10 },
+  points: { session: 10, sessionOther: 8, fullDay: 5, mastery: 30, witness: 10, bite: 2, toilet: 2, toiletCap: 10, packDay: 5, social: 5 },
+  puppyPoints: { session: 10, mastery: 50, calmDay: 20, packDay: 10, toilet: 2, toiletCap: 10, social: 10 },
   levels: [["New Recruit", 0], ["Treat Pocket", 50], ["Clicker Cadet", 150], ["Sit Specialist", 300], ["Lead Hand", 500], ["Bite Buster", 800], ["Recall Ranger", 1200], ["Pack Captain", 1700], ["Top Dog Trainer", 2400], ["Puppy School Principal", 3500]],
   puppyLevels: [["Land Shark", 0], ["Treat Seeker", 100], ["Name Knower", 250], ["Sitter", 450], ["Settler", 700], ["Good Walker", 1000], ["Recall Rookie", 1400], ["Soft Mouth", 1900], ["Clever Clogs", 2500], ["Good Dog Graduate", 3200]],
   masteryVotes: 3,
@@ -437,6 +437,8 @@ const PUPPY_CONTENT = {
     { id: "shark", g: "Biting", e: "🦈", nm: "Shark Tamer", how: "A week averaging Gentle or better. Whole pack badge.", pack: true },
     { id: "toilet20", g: "Toilet", e: "🚽", nm: "Toilet Tracker", how: "Logged 20 toilet trips." },
     { id: "dryday", g: "Toilet", e: "☀️", nm: "Dry Day", how: "A day with outside trips and no accidents. Whole pack badge.", pack: true },
+    { id: "social10", g: "Socialising", e: "🌏", nm: "Out and About", how: "Ten socialisation items ticked happy." },
+    { id: "social40", g: "Socialising", e: "🦋", nm: "Social Butterfly", how: "Forty socialisation items ticked happy. Whole pack badge.", pack: true },
     { id: "pack7", g: "Teamwork", e: "🐾", nm: "Whole Pack", how: "Seven days where everyone trained. Whole pack badge.", pack: true },
     { id: "principal", g: "Teamwork", e: "🏫", nm: "Puppy School Principal", how: "Reached level 10." }
   ],
@@ -512,6 +514,42 @@ const PUPPY_CONTENT = {
     { id: "pack", nm: "Pack Week", e: "🐾", ask: "Four days where every single person trained.", target: 4 },
     { id: "hattrick", nm: "Hat-trick Hunt", e: "🏆", ask: "Ten hat-trick days across the whole family.", target: 10 }
   ],
-  challengePoints: 25
+  challengePoints: 25,
+
+  /* ---------- socialisation checklist with counters (AVSAB, Dunbar's 100 people) ---------- */
+  socialGroups: [
+    { id: "people", nm: "People", e: "🧑", items: ["A man with a beard", "Someone in a hat or hood", "A toddler (held, calm)", "A teenager", "An older person", "Someone in high-vis or uniform", "A person with a stick, wheelchair or pram", "Someone carrying a big box or bag", "A visitor sitting on the floor", "A friend's child (treats on the floor, puppy comes to them)"] },
+    { id: "dogs", nm: "Dogs and animals", e: "🐕", items: ["A calm, fully vaccinated adult dog you know", "Puppy preschool classmates", "The cat, from behind a gate", "Chickens, sheep or stock (on lead, at a distance)", "A dog barking behind a fence"] },
+    { id: "surfaces", nm: "Surfaces", e: "🪨", items: ["Wet grass", "Tiles or lino", "Gravel", "Sand or a beach", "Decking", "A metal grate or manhole cover", "A crinkly tarp or bubble wrap", "A wobbly board or cushion", "A low step up and down"] },
+    { id: "sounds", nm: "Sounds", e: "🔊", items: ["Vacuum cleaner", "Hair dryer or blender", "Washing machine and dishwasher", "Doorbell and knocking", "Car doors and traffic", "Thunder recording, quietly", "Fireworks recording, then the real thing from indoors", "Lawnmower or chainsaw at a distance", "Playground noise", "Clapping and cheering"] },
+    { id: "places", nm: "Places", e: "📍", items: ["The car, engine running", "The vet, just for treats", "Outside the shops in your arms", "School gate at pick-up, in your arms", "A friend's house", "A cafe footpath", "A river bank or beach (once vaccinated)", "A lift or escalator (carried)"] },
+    { id: "handling", nm: "Handling", e: "🤲", items: ["Paws held, one by one", "Ears looked in", "Lip lifted, teeth looked at", "Tail touched", "Collar grabbed gently", "Picked up and put down", "Towel dry", "Brushed", "Nail clippers touched to a nail", "Harness on and off"] },
+    { id: "things", nm: "Moving things", e: "🚲", items: ["Bikes and scooters going past", "A skateboard", "An umbrella opening", "A balloon", "The hose", "A ball rolling past (she stays with you)", "A shopping trolley", "A pushchair"] }
+  ],
+  socialMoods: [["happy", "😊 Happy"], ["unsure", "😐 Unsure"], ["scared", "😟 Scared"]],
+  socialNote: "Quality beats quantity. A frightened puppy is being sensitised, not socialised. Pair everything with food, let her approach on her own, and leave while she is still happy. If she was unsure or scared, come back to that one another day, from further away.",
+
+  /* ---------- the first year, keyed to her birthday (Howell 2015, AVSAB, Kinsman 2020, Asher 2020, Hart 2024, NZ vet timings) ---------- */
+  timeline: [
+    { wk: 8, nm: "Home", body: "The socialisation window is open but already waning. Carry her out to see the world every day. First vaccination. Bladder: about an hour or two in the day." },
+    { wk: 9, nm: "Possible first wobbly fortnight", body: "Many pups startle easily around 8 to 11 weeks. Watch her, not the calendar: if something scares her, give distance and food, and try again another day. Biting peaks now; that is normal." },
+    { wk: 10, nm: "Trade games", body: "Swap-for-a-treat with toys and chews, and drop something better into her bowl while she eats. Done now, resource guarding mostly never starts." },
+    { wk: 12, nm: "Second vaccination, teeth start to loosen", body: "Preschool should have started. The 'certain' socialisation period ends about now, so the next fortnight is the last cheap one. Frozen chews for sore gums. Guy Fawkes falls here: fireworks from indoors with food, not outside." },
+    { wk: 14, nm: "Outer edge of the window", body: "Start taking known skills to new rooms, the garden, then the street in your arms. Toilet trips drop to 6 to 8 a day." },
+    { wk: 16, nm: "Third vaccination, teething in full swing", body: "Ten days after this jab she can walk footpaths and parks. Short, sniffy, soft ground. Puppies this age sleep about 11 hours a day in cohort data; keep the nap routine anyway." },
+    { wk: 18, nm: "Adult canines appearing", body: "Last call for a puppy class. Protect the soft mouth: all teeth-on-skin ends play from here. Introduce the long line for recall." },
+    { wk: 20, nm: "Five months", body: "Bladder holds 4 to 5 hours in the day. Retained baby teeth at 6 months need a vet check. Worming moves to the adult schedule." },
+    { wk: 26, nm: "Adolescence can begin", body: "Recall and manners wobble between about 6 and 12 months, peaking around 8 months. More reward, not less, and nothing is lost. For a GSP-type dog the best recent evidence says desexing no earlier than 12 months; SPCA NZ advises earlier. Decide with your vet." },
+    { wk: 34, nm: "Eight months: the dip", body: "Dogs are least obedient to their own people around now, and only to their own people. It passes. Keep sessions short and successful; keep socialising." },
+    { wk: 52, nm: "One year", body: "Growth plates closing in medium-large dogs around now. Full exercise can build from here. Talk to the vet about desexing timing if you waited." }
+  ],
+
+  /* ---------- breed notes, matched against the breed field ---------- */
+  breedNotes: [
+    { match: "pointer|gsp|vizsla|weimaraner|setter|spaniel|retriever|lab", nm: "Gundog in there", body: "Bred to find, point, flush and carry. Strong nose, strong prey drive, lots of stamina. Recall and leave-it around birds are life skills, not tricks, so start recall games before the chase instinct matures. Retrieve and scent games give the drive a job. Separation worries are common: alone time from day one, in seconds." },
+    { match: "heading|huntaway|collie|border|kelpie|shepherd|cattle|corgi|herd", nm: "Herding dog in there", body: "Bred to stare, circle and grab at close quarters. Running, shrieking children are the most exciting thing she will ever see, so no chase games, and play the 'watch the runner' game: one child walks, then jogs, then runs, at a distance where she can still eat for staying with you. Sound sensitivity is common, so take the sounds list seriously. Legal chase outlets: flirt pole on grass in short bursts (from about 5 months), fetch along the ground, tug with rules." },
+    { match: "terrier|jack russell|staffy|staffordshire|bull", nm: "Terrier in there", body: "Tenacious, mouthy and brave. Tug with rules (drop on cue) is the best game you have. Find-it and scent games burn energy without winding her up." },
+    { match: "poodle|oodle|doodle|bichon|maltese", nm: "Companion breed in there", body: "Clever and people-focused. Alone-time training matters more than usual, and grooming handling (brush, clippers, dryer) belongs on the socialisation list early." }
+  ]
 };
 if (typeof module === "object" && module.exports) module.exports = PUPPY_CONTENT; else window.PUPPY_CONTENT = PUPPY_CONTENT;
