@@ -65,17 +65,56 @@ test("right PIN unlocks; ticks, logs and settings persist", async () => {
     assert.match(login.cookie, /HttpOnly/);
     const cookie = login.cookie.split(";")[0];
 
-    const st = await call("PUT", "/api/settings", { puppy: { name: "Pepper", sex: "girl", born: "2026-08-14" }, start: "2026-10-16", family: [{ id: "p1", name: "Sam", role: "recall" }, { id: "bad id!", name: "X" }] }, cookie);
+    const st = await call("PUT", "/api/settings", { puppy: { name: "Pepper", sex: "girl", born: "2026-08-14" }, start: "2026-10-16", family: [{ id: "p1", name: "Sam", kind: "kid", target: 99 }, { id: "p2", name: "Mum", kind: "adult" }, { id: "bad id!", name: "X" }] }, cookie);
     assert.equal(st.status, 200);
-    assert.equal(st.json.settings.family.length, 1, "invalid member dropped");
+    assert.equal(st.json.settings.family.length, 2, "invalid member dropped");
+    assert.equal(st.json.settings.family[0].target, 21, "silly target falls back to the kid default");
+    assert.equal(st.json.settings.family[1].target, 10, "adult default target");
 
-    const t = await call("PUT", "/api/ticks/2026-10-16_p1_am", { on: true }, cookie);
+    const t = await call("PUT", "/api/ticks/2026-10-16_p1_am", { on: true, by: "p2", skill: "sit" }, cookie);
     assert.ok(t.json.ticks["2026-10-16_p1_am"]);
+    assert.equal(t.json.ticks["2026-10-16_p1_am"].by, "p2", "who logged it is kept");
+    assert.equal(t.json.ticks["2026-10-16_p1_am"].skill, "sit");
     assert.equal((await call("PUT", "/api/ticks/nonsense", { on: true }, cookie)).status, 400);
-    const l = await call("PUT", "/api/logs/2026-10-16", { bite: 4 }, cookie);
+    const kidBackfill = await call("PUT", "/api/ticks/2020-01-01_p1_am", { on: true, by: "p1" }, cookie);
+    assert.equal(kidBackfill.status, 403, "kids can't log past days");
+    assert.equal((await call("PUT", "/api/ticks/2020-01-01_p1_am", { on: true, by: "p2" }, cookie)).status, 200, "grown-ups can");
+    const l = await call("PUT", "/api/logs/2026-10-16", { bite: 4, by: "p1" }, cookie);
     assert.equal(l.json.logs["2026-10-16"].bite, 4);
+    assert.equal(l.json.logs["2026-10-16"].by, "p1");
 
-    const rev = l.json.rev;
+    // mastery needs a witness who isn't you; one vote per person
+    assert.equal((await call("PUT", "/api/mastery/sit", { by: "p1", witness: "p1" }, cookie)).status, 400);
+    assert.equal((await call("PUT", "/api/mastery/nope", { by: "p1", witness: "p2" }, cookie)).status, 400);
+    const mv = await call("PUT", "/api/mastery/sit", { by: "p1", witness: "p2" }, cookie);
+    assert.equal(mv.json.mastery.sit.done.length, 1);
+    await call("PUT", "/api/mastery/sit", { by: "p1", witness: "p2" }, cookie);
+    const mv2 = await call("PUT", "/api/mastery/sit", { by: "p2", witness: "p1" }, cookie);
+    assert.equal(mv2.json.mastery.sit.done.length, 2, "repeat vote by the same person doesn't double up");
+    const un = await call("PUT", "/api/mastery/sit", { by: "p2", on: false }, cookie);
+    assert.equal(un.json.mastery.sit.done.length, 1, "a vote can be taken back");
+
+    // toilet log, with undo
+    assert.equal((await call("POST", "/api/toilet", { kind: "swim", by: "p1" }, cookie)).status, 400);
+    const tl = await call("POST", "/api/toilet", { kind: "wee", before: "woke", by: "p1" }, cookie);
+    assert.equal(tl.json.toilet.length, 1);
+    assert.equal(tl.json.toilet[0].before, "woke");
+    const del = await call("DELETE", "/api/toilet/" + tl.json.toilet[0].id, undefined, cookie);
+    assert.equal(del.json.toilet[0].void, true);
+
+    // puppy photo: JPEG data URL in, image out
+    assert.equal((await call("GET", "/api/photo", undefined, cookie)).status, 404);
+    assert.equal((await call("PUT", "/api/photo", { data: "data:image/png;base64,AAAA" }, cookie)).status, 400);
+    const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(200, 1), Buffer.from([0xff, 0xd9])]);
+    const ph = await call("PUT", "/api/photo", { data: "data:image/jpeg;base64," + jpeg.toString("base64") }, cookie);
+    assert.equal(ph.status, 200);
+    assert.equal(ph.json.photo, true);
+    const img = await fetch(b2 + "/api/photo", { headers: { Cookie: cookie } });
+    assert.equal(img.headers.get("content-type"), "image/jpeg");
+    assert.equal((await img.arrayBuffer()).byteLength, jpeg.length);
+    assert.equal((await fetch(b2 + "/api/photo")).status, 401, "photo needs the PIN too");
+
+    const rev = (await call("GET", "/api/state", undefined, cookie)).json.rev;
     const same = await call("GET", "/api/state?since=" + rev, undefined, cookie);
     assert.equal(same.json.unchanged, true);
 

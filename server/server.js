@@ -20,8 +20,10 @@ const http = require("node:http");
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
+const CONTENT = require("../public/content.js");
+const REWARDS = require("../public/rewards.js");
 
-const VERSION = "1.0.0";
+const VERSION = "2.0.0";
 const PUBLIC_DIR = path.resolve(__dirname, "..", "public");
 const MIME = {
   ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",
@@ -37,7 +39,12 @@ const CSP = [
 
 const TICK_RE = /^\d{4}-\d{2}-\d{2}_[A-Za-z0-9]{1,24}_(am|pm|ev)$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-const ROLES = new Set(["selfcontrol", "recall", "tricks", "manners", "helper"]);
+const KINDS = new Set(["kid", "adult"]);
+const AGES = new Set(["", "5-7", "8-9", "10-11", "12-14", "15+"]);
+const SKILL_IDS = new Set(CONTENT.skills.map((s) => s.id));
+const TOILET_KINDS = new Set(CONTENT.toiletKinds.map((k) => k[0]));
+const TOILET_BEFORE = new Set(CONTENT.toiletBefore.map((k) => k[0]));
+const localToday = () => { const d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); };
 
 function createApp(opts = {}) {
   const pin = String(opts.pin ?? process.env.PUPPY_PIN ?? "");
@@ -88,7 +95,7 @@ function createApp(opts = {}) {
 
   /* ---------- store ---------- */
   const storeFile = path.join(dataDir, "store.json");
-  let db = { rev: 1, settings: null, ticks: {}, logs: {} };
+  let db = { rev: 1, settings: null, ticks: {}, logs: {}, mastery: {}, toilet: [] };
   if (fs.existsSync(storeFile)) { try { db = Object.assign(db, JSON.parse(fs.readFileSync(storeFile, "utf8"))); } catch (e) { log("store.json unreadable, starting fresh:", e.message); } }
   function persist() {
     db.rev++;
@@ -96,15 +103,21 @@ function createApp(opts = {}) {
     fs.writeFileSync(tmp, JSON.stringify(db));
     fs.renameSync(tmp, storeFile);
   }
-  const stateOut = () => ({ rev: db.rev, settings: db.settings, ticks: db.ticks, logs: db.logs });
+  const photoFile = path.join(dataDir, "photo.jpg");
+  const stateOut = () => ({ rev: db.rev, settings: db.settings, ticks: db.ticks, logs: db.logs, mastery: db.mastery, toilet: db.toilet.slice(-300), photo: fs.existsSync(photoFile), today: localToday() });
+  const member = (id) => (db.settings && db.settings.family.find((m) => m.id === id)) || null;
 
   function cleanSettings(x) {
     if (!x || typeof x !== "object") return null;
     const str = (v, n) => (typeof v === "string" ? v.trim().slice(0, n) : "");
     const p = x.puppy || {};
     const fam = Array.isArray(x.family) ? x.family.slice(0, 6) : [];
-    const family = fam.map((m) => ({ id: str(m && m.id, 24), name: str(m && m.name, 20), role: ROLES.has(m && m.role) ? m.role : "helper" }))
-      .filter((m) => /^[A-Za-z0-9]{1,24}$/.test(m.id) && m.name);
+    const family = fam.map((m) => {
+      const kind = KINDS.has(m && m.kind) ? m.kind : "kid";
+      const t = Number(m && m.target);
+      return { id: str(m && m.id, 24), name: str(m && m.name, 20), kind, age: AGES.has(m && m.age) ? m.age : "",
+        target: Number.isInteger(t) && t >= 1 && t <= 30 ? t : CONTENT.kinds[kind].target };
+    }).filter((m) => /^[A-Za-z0-9]{1,24}$/.test(m.id) && m.name);
     if (!family.length) return null;
     return {
       puppy: { name: str(p.name, 24), sex: p.sex === "boy" ? "boy" : "girl", breed: str(p.breed, 80), born: DATE_RE.test(p.born) ? p.born : "" },
@@ -123,11 +136,11 @@ function createApp(opts = {}) {
       "X-Content-Type-Options": "nosniff", "Referrer-Policy": "same-origin", "Content-Security-Policy": CSP }, headers));
     res.end(isObj ? JSON.stringify(body) : body);
   }
-  function readJson(req) {
+  function readJson(req, max = 32 * 1024) {
     return new Promise((resolve, reject) => {
       if (!/application\/json/.test(String(req.headers["content-type"] || ""))) return reject(Object.assign(new Error("JSON only"), { code: 415 }));
       let size = 0; const chunks = [];
-      req.on("data", (c) => { size += c.length; if (size > 32 * 1024) { reject(Object.assign(new Error("too big"), { code: 413 })); req.destroy(); } else chunks.push(c); });
+      req.on("data", (c) => { size += c.length; if (size > max) { reject(Object.assign(new Error("too big"), { code: 413 })); req.destroy(); } else chunks.push(c); });
       req.on("end", () => { try { resolve(JSON.parse(Buffer.concat(chunks).toString() || "{}")); } catch { reject(Object.assign(new Error("bad JSON"), { code: 400 })); } });
       req.on("error", reject);
     });
@@ -185,14 +198,64 @@ function createApp(opts = {}) {
       const key = decodeURIComponent(m[1]);
       if (!TICK_RE.test(key)) return send(res, 400, { error: "Bad tick" });
       const body = await readJson(req);
-      if (body.on) db.ticks[key] = { at: now() }; else delete db.ticks[key];
+      const by = member(body.by);
+      const date = key.slice(0, 10);
+      if (by && by.kind === "kid" && date < localToday()) return send(res, 403, { error: "Ask a grown-up to log a past day" });
+      if (body.on) db.ticks[key] = { at: now(), by: by ? by.id : undefined, skill: SKILL_IDS.has(body.skill) ? body.skill : undefined };
+      else delete db.ticks[key];
       persist(); return send(res, 200, stateOut());
+    }
+    if ((m = p.match(/^\/api\/mastery\/([a-z]+)$/)) && req.method === "PUT") {
+      const skill = m[1];
+      if (!SKILL_IDS.has(skill)) return send(res, 400, { error: "Unknown skill" });
+      const body = await readJson(req);
+      const by = member(body.by), witness = member(body.witness);
+      if (!by) return send(res, 400, { error: "Who did it?" });
+      const entry = (db.mastery[skill] = db.mastery[skill] || { done: [] });
+      entry.done = entry.done.filter((d) => d.by !== by.id);
+      if (body.on !== false) {
+        if (!witness || witness.id === by.id) return send(res, 400, { error: "Needs a witness who isn't you" });
+        entry.done.push({ by: by.id, witness: witness.id, at: now() });
+      }
+      persist(); return send(res, 200, stateOut());
+    }
+    if (p === "/api/toilet" && req.method === "POST") {
+      const body = await readJson(req);
+      const by = member(body.by);
+      if (!TOILET_KINDS.has(body.kind)) return send(res, 400, { error: "Bad kind" });
+      const id = crypto.randomBytes(6).toString("hex");
+      db.toilet.push({ id, at: now(), kind: body.kind, before: TOILET_BEFORE.has(body.before) ? body.before : "", by: by ? by.id : undefined });
+      if (db.toilet.length > 1000) db.toilet = db.toilet.slice(-1000);
+      persist(); return send(res, 200, stateOut());
+    }
+    if ((m = p.match(/^\/api\/toilet\/([a-f0-9]{12})$/)) && req.method === "DELETE") {
+      const t = db.toilet.find((x) => x.id === m[1]);
+      if (!t) return send(res, 404, { error: "Not found" });
+      t.void = true; persist(); return send(res, 200, stateOut());
+    }
+    if (p === "/api/photo") {
+      if (req.method === "GET") {
+        if (!fs.existsSync(photoFile)) return send(res, 404, "No photo");
+        res.writeHead(200, { "Content-Type": "image/jpeg", "Cache-Control": "private, max-age=60", "X-Content-Type-Options": "nosniff" });
+        return fs.createReadStream(photoFile).pipe(res);
+      }
+      if (req.method === "PUT") {
+        const body = await readJson(req, 600 * 1024);
+        const mm = /^data:image\/jpeg;base64,([A-Za-z0-9+/=]+)$/.exec(String(body.data || ""));
+        if (!mm) return send(res, 400, { error: "Send a JPEG data URL" });
+        const buf = Buffer.from(mm[1], "base64");
+        if (buf.length < 100 || buf.length > 400 * 1024 || buf[0] !== 0xff || buf[1] !== 0xd8) return send(res, 400, { error: "Not a JPEG, or too big" });
+        fs.writeFileSync(photoFile, buf, { mode: 0o600 });
+        persist(); return send(res, 200, stateOut());
+      }
+      if (req.method === "DELETE") { try { fs.unlinkSync(photoFile); } catch {} persist(); return send(res, 200, stateOut()); }
     }
     if ((m = p.match(/^\/api\/logs\/(\d{4}-\d{2}-\d{2})$/)) && req.method === "PUT") {
       const body = await readJson(req);
       const bite = Number(body.bite);
       if (!Number.isInteger(bite) || bite < 0 || bite > 5) return send(res, 400, { error: "Bad value" });
-      if (bite === 0) delete db.logs[m[1]]; else db.logs[m[1]] = { bite };
+      const by = member(body.by);
+      if (bite === 0) delete db.logs[m[1]]; else db.logs[m[1]] = { bite, by: by ? by.id : undefined };
       persist(); return send(res, 200, stateOut());
     }
     return send(res, 404, { error: "Not found" });

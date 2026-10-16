@@ -1,33 +1,70 @@
 # Puppy School HQ
 
-A free, mobile-first puppy training plan and tick-off chart for the whole family.
+**The puppy training app for families.** Free, open source, reward-based, and built around the thing no other app does: everyone in the house trains the same puppy, with the same words, and the kids actually want to.
 
-Everyone does **5 minutes, 3 times a day**. Tap a box when you've done a session. The app gives you a 6-week plan, step-by-step skills with little animations showing where to move the treat, a big **Help!** section for biting and other puppy problems, and 100+ hand-picked YouTube videos (lots of 1-minute shorts).
+Everyone does **5 minutes, 3 times a day**. The app deals each person a mission, keeps the whole family on one shared chart, and turns showing up into streaks, levels and badges for the humans while the puppy's own progress is the number the family wins together.
 
-Made in New Zealand for a German Shorthaired Pointer × heading dog puppy who bites a lot. Works for any puppy.
+Made in New Zealand for a German Shorthaired Pointer x heading dog puppy who bites a lot, and for the three kids who are training her. Works for any puppy and any family.
+
+## Why this exists
+
+We looked hard at the puppy apps on the market (Zigzag, Dogo, Puppr, Woofz, Hundeo, Pupford and a dozen trackers). They have all converged on the same product: a quiz, an age-based plan, three daily tasks, videos, a problem library, a clicker, and a thin free tier behind a trial. What none of them has is the family layer:
+
+- one shared chart with **per-person sessions**, so you can see who trained and when;
+- a **child mode** of any kind (one of them blocks under-13s outright);
+- a **shared cue sheet**, even though every trainer says "one word per behaviour, everyone uses it" is step one;
+- any answer to the steady stream of "my family keep ruining training" posts.
+
+And the loudest complaint about all of them is billing and lock-in. So this one is free, needs no account, and exports everything.
 
 ## What's in it
 
-- **Today**: a chore-chart style grid (Morning / Afternoon / Evening for each person), a daily "how bitey was she?" meter, and the week's minutes.
-- **Plan**: 6 weeks of skills, family roles, cue words everyone uses, treats, house rules and a safe socialising checklist.
-- **Skills**: 22 skills from the name game and Sit to Roll over and Play dead, each with steps, a "done when" goal and videos.
-- **Help!**: an SOS card for "she's biting right now", 12 bite-sized biting topics, and 16 other problems (chewing, jumping, crying at night, toilet, guarding, herding nips, zoomies, barking, stealing, lead pulling, chasing cats, fear, vet handling, escaping, boredom).
-- **Watch**: starter playlists, every 1-minute short in one place, and the famous YouTube trainers (Kikopup, McCann, Zak George, Victoria Stilwell, Susan Garrett, Ian Dunbar, Cesar Millan and more), each labelled reward-based, mixed or uses corrections.
+**Today**
+- Your three **missions** for the day, dealt from the skills that are open, rotating so that across a week every person touches every skill and the puppy gets the full spread.
+- Everyone's row with a progress ring, streak and level. Tick your own slot in one tap; logging for someone else asks first and records who did it.
+- The **puppy's progress** meter: ten puppy levels from Land Shark to Good Dog Graduate, fed by sessions, skills mastered, calm days and toilet wins. The dog is the team.
+- A daily **bite meter** (Angel to Shark) with a week sparkline, because the bite meter dropping is what the family actually wants.
+- A **toilet log**: wee, poo or accident, what came before, when the next trip is due for the puppy's age, and the pattern behind accidents.
 
-- **Plays videos in the app.** Videos open in a built-in player (YouTube's privacy-enhanced embed) so kids don't end up on YouTube's home page. YouTube may still show ads on some creators' videos, which is how they get paid for free content.
-- **Installs like an app.** On a phone, use *Add to Home Screen*. It opens full screen and the app shell works offline.
+**Skills**
+- 23 skills as a **tree**, not a calendar. Sit opens Down and Stay; Come opens Hide and seek. A skill opens the moment someone has practised what it builds on, so a keen family moves fast and nobody waits for "week 5" to play find-it.
+- Each skill has steps, a lure animation where it helps, a "done when" goal, and short videos.
+- **Mastery takes three people and a witness.** That is where the big points are, so it is the one thing that needs a co-sign. It also makes every family member a generalisation step for the dog.
+- The 6-week plan is still there as a suggested path, plus the cue sheet, treat ladder, house rules and safe-socialising list.
 
-All the training content lives in one file: [`public/content.js`](public/content.js). Fork it and make it yours.
+**Pack**
+- **Streaks** that one session a day keeps alive, with two automatic freezes a week. Missing a day is forgiven; coming back is celebrated.
+- **Levels** (New Recruit to Puppy School Principal) and a **badge grid** with every earn condition visible.
+- A **weekly podium** ranked by percent of each person's own goal, so a kid on 21 sessions and a parent on 10 race fairly. It resets Sunday night. Kids vs grown-ups runs alongside.
+- A **pack streak** for days where everyone trained.
+
+**Help!** An SOS card for "she's biting right now", twelve bite-sized biting topics, and sixteen other problems (chewing, jumping, night crying, toileting, guarding, herding nips, zoomies, barking, stealing, pulling, chasing, fear, vet handling, escaping, boredom).
+
+**Watch**: starter playlists, every 1-minute short in one place, and the well-known YouTube trainers, each labelled reward-based, mixed or uses corrections.
+
+**And the small stuff that matters**
+- Plays videos inside the app (YouTube's privacy-enhanced embed), so kids don't end up on YouTube's home page.
+- Installs like an app: *Add to Home Screen*. Opens full screen, the shell works offline.
+- Light and dark mode, following the phone or set in Settings.
+- The puppy's photo in the corner.
+- Confetti and a buzz for a first badge or a level up, never for a routine tick.
+- Export the whole chart as JSON any time.
+
+All the training content lives in one file: [`public/content.js`](public/content.js). The rewards engine is one file too: [`public/rewards.js`](public/rewards.js). Fork it and make it yours.
+
+## The design, in one paragraph
+
+Rewards for the humans are symbolic (points, streaks, levels, badges) and capped by puppy welfare: three sessions a slot is the limit, so nothing is worth farming. Nobody is ranked by raw points; comparison is always against your own weekly goal. Sessions count the moment they are ticked, because parent-approval queues are where every family chore app dies. Forgiveness beats pressure, which is the single clearest finding from Duolingo's own streak experiments. And the puppy's progress is the headline number, so siblings are on the same team by construction.
 
 ## Three ways to run it
 
 | | Family sync | PIN | Needs a server |
 |---|---|---|---|
 | **1. Open the file** | No, saved on each phone | No | No |
-| **2. Static hosting** (App Engine, GitHub Pages, Netlify) | No, saved on each phone | No | No |
-| **3. Self-host** (`server/server.js`) | **Yes**, one shared chart | **Yes**, simple family PIN | Yes |
+| **2. Static hosting** (GitHub Pages, Netlify, App Engine) | No, saved on each phone | No | No |
+| **3. Self-host** (`server/server.js`) | **Yes**, one shared chart | **Yes**, a family PIN | Yes |
 
-The app works out which mode it's in by itself.
+The app works out which mode it's in by itself. Streaks, levels and badges work in all three.
 
 ### 1. Open the file
 
@@ -35,23 +72,17 @@ The app works out which mode it's in by itself.
 npm run build      # makes dist/puppy-school.html
 ```
 
-Open `dist/puppy-school.html` on a phone or send it to someone. Ticks save on that phone.
+Open `dist/puppy-school.html` on a phone or send it to someone. Everything saves on that phone.
 
 ### 2. Static hosting
 
 Serve the `public/` folder from anywhere.
 
-**GitHub Pages (free, 2 minutes):** fork this repo, then go to *Settings → Pages → Deploy from a branch → `main` / `(root)`*. Your app will be at `https://YOUR-NAME.github.io/puppy-training/`.
-
-**Google App Engine:**
-
-```bash
-gcloud app deploy --project YOUR_PROJECT
-```
+**GitHub Pages (free, 2 minutes):** fork this repo, then *Settings → Pages → Deploy from a branch → `main` / `(root)`*. Your app will be at `https://YOUR-NAME.github.io/puppy-training/`.
 
 ### 3. Self-host with a family PIN (recommended for families)
 
-One chart the whole family shares from their own phones. Kids unlock it once with a number PIN and stay signed in for 180 days.
+One chart the whole family shares from their own phones. Everyone unlocks it once with a number PIN, picks their name, and stays signed in for 180 days.
 
 Needs Node 18+. No dependencies to install.
 
@@ -76,7 +107,7 @@ Then put HTTPS in front of it (Caddy, nginx, a Cloudflare Tunnel or Tailscale Fu
 |---|---|---|
 | `PUPPY_PIN` | required | 4 to 8 digits. Use 6+ if it's on the public internet. Changing it signs every phone out. |
 | `PORT` / `HOST` | `8080` / `0.0.0.0` | |
-| `DATA_DIR` | `./data` | `store.json` (the chart) and `secret.key` live here. Back it up. |
+| `DATA_DIR` | `./data` | `store.json` (the chart), `photo.jpg` and `secret.key` live here. Back it up. |
 | `SESSION_DAYS` | `180` | How long a phone stays unlocked. |
 | `TRUST_PROXY` | off | Set `1` behind a reverse proxy or tunnel so rate limits and secure cookies use the real client. |
 
@@ -84,23 +115,31 @@ Then put HTTPS in front of it (Caddy, nginx, a Cloudflare Tunnel or Tailscale Fu
 
 - Wrong PINs are rate limited: 5 per device per 15 minutes, and 20 in total per hour across everyone. After that, even the right PIN waits.
 - Sessions are signed, HttpOnly, SameSite=Strict cookies. Writes must be JSON, which blocks cross-site form tricks.
+- Kids can't log past days (a grown-up can). Any tick can be undone by the person who made it within 15 minutes.
 - A short PIN is a family front-door lock, not bank security. It keeps strangers out of your chart. Don't store anything secret in it.
-
-## Run it as a Claude artifact
-
-`npm run build` also makes `dist/artifact.html`. Published as a Claude artifact, it syncs between everyone signed in to that page.
 
 ## Development
 
 ```bash
-npm test     # server tests (node:test, no dependencies)
+npm test     # server and rewards-engine tests (node:test, no dependencies)
 npm run build
 ```
 
-- `public/` is the whole app: `index.html`, `styles.css`, `content.js` (all the training content), `app.js`, `sw.js` (offline shell) and `manifest.webmanifest`.
+- `public/` is the whole app: `index.html`, `styles.css`, `content.js` (all the training content), `rewards.js` (points, streaks, levels, badges, missions), `app.js`, `theme.js`, `sw.js` (offline shell) and `manifest.webmanifest`.
 - `server/server.js` is the optional PIN server, one file, no dependencies.
+- Bump `VERSION` in `public/sw.js` whenever you change files in `public/`, so installed phones pick up the update.
 
-Contributions welcome, especially new skills, better videos, translations and fixes to `content.js`. Please keep the training advice reward-based.
+Contributions welcome, especially new skills, better videos, translations, breed notes and fixes to `content.js`. Please keep the training advice reward-based.
+
+## Roadmap
+
+- Push notifications per phone (school-aware windows, two a day at most, quiet hours, a "reminders are having a rest" exit) and optional SMS.
+- A kids-and-dogs safety module: the Pat-Pet-Pause consent test, Be a Tree, a traffic-light body-language game, tasks by age.
+- Weekly challenges, buddy streaks and co-signed "I taught my brother Sit".
+- A dated development timeline keyed to the puppy's birthday: fear periods, teething, vaccinations, the adolescent dip.
+- Socialisation counters, weight on a growth curve, vaccine and worming dates.
+- A pinned cue sheet and a shareable visitor card for grandparents and sitters.
+- Multi-family hosting so any family can sign up with their own PIN.
 
 ## A note on training methods
 
@@ -110,4 +149,8 @@ This app is general guidance, not a substitute for your vet or a qualified train
 
 ## Licence
 
-MIT. Free for any puppy parent, trainer or rescue to use, change and share.
+[AGPL-3.0](LICENSE). Free for any puppy parent, trainer or rescue to use, change and share. If you change it and offer it to other people as a service, you share your changes under the same licence, so improvements flow back to every family.
+
+Want a branded version for your puppy preschool, daycare, vet clinic or training business without publishing your changes? A commercial licence and hosted, branded versions are available: open an issue or email hello@growthspurt.agency.
+
+The name Puppy School HQ and its logo are not covered by the licence.

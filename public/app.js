@@ -1,12 +1,14 @@
-/* Puppy School HQ — app logic.
+/* Puppy School HQ: app logic.
  * Storage modes, picked automatically:
  *   server : self-hosted with server/server.js (family PIN, everyone syncs)
- *   claude : running as a Claude artifact (signed-in viewers sync)
- *   local  : anywhere else (static hosting, opened from disk) — saved on this device
+ *   local  : anywhere else (static hosting, opened from disk), saved on this device
+ * Rewards (points, streaks, levels, badges, missions) are computed by rewards.js from the
+ * chart itself, so every phone agrees without extra sync.
  */
 (function () {
 "use strict";
 const C = window.PUPPY_CONTENT;
+const R = window.PUPPY_REWARDS;
 const $ = (s) => document.querySelector(s);
 function el(tag, attrs, kids) {
   const n = document.createElement(tag);
@@ -24,6 +26,7 @@ function el(tag, attrs, kids) {
 function lsGet(k, f) { try { const v = localStorage.getItem(k); return v == null ? f : JSON.parse(v); } catch (e) { return f; } }
 function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
 function toast(m) { const t = $("#toast"); t.textContent = m; t.classList.add("show"); clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove("show"), 2400); }
+const buzz = (p) => { try { if (navigator.vibrate) navigator.vibrate(p || 12); } catch (e) {} };
 
 /* ---------- dates ---------- */
 const pad = (n) => String(n).padStart(2, "0");
@@ -34,7 +37,8 @@ const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const fmt = (d) => DAYS[d.getDay()] + " " + d.getDate() + " " + MON[d.getMonth()];
 const short = (d) => d.getDate() + " " + MON[d.getMonth()];
-const today = new Date(); today.setHours(0, 0, 0, 0);
+let today = new Date(); today.setHours(0, 0, 0, 0);
+const ago = (ms) => { const m = Math.round((Date.now() - ms) / 60000); if (m < 1) return "just now"; if (m < 60) return m + " min ago"; const h = Math.floor(m / 60); return h < 24 ? h + " h " + (m % 60) + " min ago" : Math.floor(h / 24) + " day" + (h >= 48 ? "s" : "") + " ago"; };
 
 /* ---------- pronouns: content is written with "she"; swap for boys ---------- */
 const OBJ = new Set("a an the for to with up down in out off when while and again back on onto into away so as if until from each every before after too more less is was gets get has needs need knows know learns learn wants want can will at by over round around understand what how why where who that this these those something anything some any lots plenty time space enough just only straight first near close all both yet".split(" "));
@@ -51,18 +55,41 @@ function T(str) {
 }
 
 /* ---------- state ---------- */
-const S = { settings: null, ticks: new Set(), logs: {} };
+const S = { settings: null, ticks: {}, logs: {}, mastery: {}, toilet: [], photo: false, scores: null };
 let store = null;
 let viewDay = new Date(today);
 let staticKey = "";
 const PCOL = ["var(--p1)", "var(--p2)", "var(--p3)", "var(--p4)", "var(--p5)", "var(--p6)"];
 const family = () => (S.settings ? S.settings.family : []);
+const person = (id) => family().find((p) => p.id === id) || null;
 const colorOf = (p) => PCOL[Math.max(0, family().indexOf(p)) % PCOL.length];
 const tickKey = (date, pid, slot) => date + "_" + pid + "_" + slot;
 const startDate = () => parseIso(S.settings && S.settings.start) || today;
 const weekIndex = (d) => Math.floor((d - startDate()) / 864e5 / 7);
 const pupName = () => (S.settings && S.settings.puppy.name) || "your puppy";
+const skillById = (id) => C.skills.find((s) => s.id === id) || null;
 const BITE = [["😇", "Angel"], ["🙂", "Gentle"], ["😬", "Mouthy"], ["😣", "Bitey"], ["🦈", "Shark"]];
+const SLOT_EMOJI = { am: "🌅", pm: "☀️", ev: "🌙" };
+
+/* ---------- who is on this phone ---------- */
+let meId = lsGet("pt.me", null);
+const me = () => person(meId);
+const isAdult = (p) => !!p && p.kind === "adult";
+function setMe(id) { meId = id; lsSet("pt.me", id); }
+
+/* ---------- theme ---------- */
+function applyTheme() {
+  const t = lsGet("pt.theme", "system");
+  if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t); else document.documentElement.removeAttribute("data-theme");
+  const dark = t === "dark" || (t === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
+  const meta = document.querySelector('meta[name="theme-color"]'); if (meta) meta.content = dark ? "#3a241c" : "#5b3427";
+}
+
+/* ---------- scores ---------- */
+function recompute() {
+  try { S.scores = S.settings ? R.compute(S, C, { today: iso(today) }) : null; } catch (e) { console.error(e); S.scores = null; }
+}
+const scoreOf = (pid) => (S.scores && S.scores.people[pid]) || null;
 
 /* ---------- stores ---------- */
 async function api(method, url, body) {
@@ -75,13 +102,21 @@ class LocalStore {
   async init(cb) {
     this.cb = cb;
     S.settings = lsGet("pt.settings", null);
-    S.ticks = new Set(lsGet("pt.ticks", []));
-    S.logs = lsGet("pt.logs", {});
+    const t = lsGet("pt.ticks", {}); S.ticks = Array.isArray(t) ? Object.fromEntries(t.map((k) => [k, { at: 0 }])) : t;
+    S.logs = lsGet("pt.logs", {}); S.mastery = lsGet("pt.mastery", {}); S.toilet = lsGet("pt.toilet", []);
+    S.photo = !!lsGet("pt.photo", null);
     cb();
   }
-  async saveSettings(x) { S.settings = x; lsSet("pt.settings", x); this.cb(); }
-  async setTick(k, on) { on ? S.ticks.add(k) : S.ticks.delete(k); lsSet("pt.ticks", [...S.ticks]); this.cb(); }
-  async setLog(date, v) { S.logs[date] = v; lsSet("pt.logs", S.logs); this.cb(); }
+  save() { lsSet("pt.settings", S.settings); lsSet("pt.ticks", S.ticks); lsSet("pt.logs", S.logs); lsSet("pt.mastery", S.mastery); lsSet("pt.toilet", S.toilet); this.cb(); }
+  async saveSettings(x) { S.settings = x; this.save(); }
+  async setTick(k, on, extra) { if (on) S.ticks[k] = Object.assign({ at: Date.now() }, extra || {}); else delete S.ticks[k]; this.save(); }
+  async setLog(date, v) { if (v.bite) S.logs[date] = v; else delete S.logs[date]; this.save(); }
+  async setMastery(skill, by, witness, on) { const e = (S.mastery[skill] = S.mastery[skill] || { done: [] }); e.done = e.done.filter((d) => d.by !== by); if (on !== false) e.done.push({ by, witness, at: Date.now() }); this.save(); }
+  async addToilet(x) { S.toilet.push(Object.assign({ id: Math.random().toString(16).slice(2, 14), at: Date.now() }, x)); if (S.toilet.length > 1000) S.toilet = S.toilet.slice(-1000); this.save(); }
+  async voidToilet(id) { const t = S.toilet.find((x) => x.id === id); if (t) t.void = true; this.save(); }
+  async setPhoto(data) { if (data) lsSet("pt.photo", data); else { try { localStorage.removeItem("pt.photo"); } catch (e) {} } S.photo = !!data; this.cb(); }
+  photoUrl() { return lsGet("pt.photo", null); }
+  exportJson() { return { settings: S.settings, ticks: S.ticks, logs: S.logs, mastery: S.mastery, toilet: S.toilet }; }
 }
 class ServerStore {
   constructor() { this.mode = "server"; this.rev = -1; }
@@ -89,8 +124,8 @@ class ServerStore {
     if (!j || j.rev === undefined) return;
     this.rev = j.rev;
     S.settings = j.settings || null;
-    S.ticks = new Set(Object.keys(j.ticks || {}));
-    S.logs = j.logs || {};
+    S.ticks = j.ticks || {}; S.logs = j.logs || {}; S.mastery = j.mastery || {}; S.toilet = j.toilet || [];
+    if (j.photo !== S.photo) { S.photo = !!j.photo; this.photoBust = Date.now(); }
     this.cb();
   }
   async init(cb) {
@@ -119,33 +154,20 @@ class ServerStore {
     this.apply(r.json);
   }
   saveSettings(x) { return this.write("PUT", "api/settings", x); }
-  async setTick(k, on) { on ? S.ticks.add(k) : S.ticks.delete(k); this.cb(); return this.write("PUT", "api/ticks/" + encodeURIComponent(k), { on }); }
-  async setLog(date, v) { S.logs[date] = v; this.cb(); return this.write("PUT", "api/logs/" + date, v); }
-}
-class ClaudeStore {
-  constructor(db, canWrite) { this.mode = "claude"; this.db = db; this.canWrite = canWrite; }
-  init(cb) {
-    this.cb = cb;
-    const db = this.db;
-    return new Promise((resolve) => {
-      let ready = false;
-      const done = () => { if (!ready) { ready = true; resolve(); } cb(); };
-      db.doc("settings/family").onSnapshot((s) => { S.settings = s.exists ? s.data() : null; done(); }, () => done());
-      db.collection("ticks").onSnapshot((q) => { S.ticks = new Set(q.docs.filter((d) => d.exists).map((d) => d.id)); if (ready) cb(); }, () => {});
-      db.collection("logs").onSnapshot((q) => { const L = {}; q.docs.forEach((d) => { if (d.exists) L[d.id] = d.data(); }); S.logs = L; if (ready) cb(); }, () => {});
-      setTimeout(done, 8000);
-    });
+  async setTick(k, on, extra) {
+    const prev = S.ticks[k];
+    if (on) S.ticks[k] = Object.assign({ at: Date.now() }, extra || {}); else delete S.ticks[k];
+    this.cb();
+    try { await this.write("PUT", "api/ticks/" + encodeURIComponent(k), Object.assign({ on }, extra || {})); }
+    catch (e) { if (prev) S.ticks[k] = prev; else delete S.ticks[k]; this.cb(); throw e; }
   }
-  async guard(fn) {
-    if (!this.canWrite) { toast("This account can view the family chart but can't save to it."); return; }
-    try { await fn(); } catch (e) {
-      if (e && e.code === "invalid_argument") { this.canWrite = false; setSync(); toast("This account can view the family chart but can't save to it."); }
-      else toast("Couldn't save just now. Try again in a moment.");
-    }
-  }
-  saveSettings(x) { return this.guard(() => this.db.doc("settings/family").set(JSON.parse(JSON.stringify(x)))); }
-  setTick(k, on) { return this.guard(() => on ? this.db.collection("ticks").doc(k).set({ at: Date.now() }) : this.db.collection("ticks").doc(k).delete()); }
-  setLog(date, v) { return this.guard(() => this.db.collection("logs").doc(date).set(v)); }
+  async setLog(date, v) { if (v.bite) S.logs[date] = v; else delete S.logs[date]; this.cb(); return this.write("PUT", "api/logs/" + date, v); }
+  setMastery(skill, by, witness, on) { return this.write("PUT", "api/mastery/" + skill, { by, witness, on }); }
+  addToilet(x) { return this.write("POST", "api/toilet", x); }
+  voidToilet(id) { return this.write("DELETE", "api/toilet/" + id); }
+  setPhoto(data) { return data ? this.write("PUT", "api/photo", { data }) : this.write("DELETE", "api/photo"); }
+  photoUrl() { return S.photo ? "api/photo?v=" + (this.photoBust || 0) : null; }
+  exportJson() { return { settings: S.settings, ticks: S.ticks, logs: S.logs, mastery: S.mastery, toilet: S.toilet }; }
 }
 async function pickStore() {
   if (/^https?:/.test(location.protocol)) {
@@ -154,30 +176,21 @@ async function pickStore() {
       if (r.ok) { const j = await r.json(); if (j && j.app === "puppy-training") return new ServerStore(); }
     } catch (e) {}
   }
-  if (window.claude && typeof window.claude.use === "function") {
-    try {
-      const db = await window.claude.use("db");
-      if (db) {
-        let canWrite = true;
-        try { const u = await window.claude.use("user"); if (u && typeof u.can === "function") { const c = await u.can("data.write"); if (c === false) canWrite = false; } } catch (e) {}
-        return new ClaudeStore(db, canWrite);
-      }
-    } catch (e) {}
-  }
   return new LocalStore();
 }
 function setSync() {
   const s = $("#sync");
   if (!store) return;
   if (store.mode === "server") { s.textContent = "Family sync"; s.dataset.s = "live"; }
-  else if (store.mode === "claude") { s.textContent = store.canWrite ? "Family sync" : "View only"; s.dataset.s = store.canWrite ? "live" : "local"; }
   else { s.textContent = "This phone"; s.dataset.s = "local"; }
-  s.title = s.textContent;
-  s.setAttribute("aria-label", s.textContent);
+  s.title = s.textContent; s.setAttribute("aria-label", s.textContent);
+}
+async function safe(fn, okMsg) {
+  try { await fn(); if (okMsg) toast(okMsg); } catch (e) { toast(e && e.message && e.message !== "save failed" ? e.message : "Couldn't save. Check your connection."); }
 }
 
 /* ---------- navigation ---------- */
-const TABS = ["today", "plan", "skills", "help", "watch"];
+const TABS = ["today", "skills", "pack", "help", "watch"];
 let current = "today";
 function show(tab) {
   document.querySelectorAll("section.panel").forEach((s) => (s.hidden = s.dataset.tab !== tab));
@@ -189,6 +202,27 @@ function show(tab) {
 }
 document.querySelectorAll("nav.tabs button").forEach((b) => b.addEventListener("click", () => show(b.dataset.go)));
 $("#gear").addEventListener("click", () => { if (!S.settings) return; renderSettings(false); show("settings"); });
+$("#meChip").addEventListener("click", () => { if (S.settings) renderWho(); });
+
+/* ---------- avatars and small widgets ---------- */
+function avatar(p, size) {
+  return el("span", { class: "av" + (size ? " " + size : ""), style: "--c:" + colorOf(p), "aria-hidden": "true", text: p.name[0].toUpperCase() });
+}
+function ring(n, total, size, color) {
+  const r = 15.9155, segs = [];
+  for (let i = 0; i < total; i++) {
+    const on = i < n;
+    segs.push('<circle r="' + r + '" cx="18" cy="18" fill="none" stroke="' + (on ? color || "var(--blaze)" : "var(--sunk)") + '" stroke-width="3.6" stroke-dasharray="' + (100 / total - 4) + ' ' + (100 - 100 / total + 4) + '" stroke-dashoffset="' + (25 - (100 / total) * i) + '" stroke-linecap="round"/>');
+  }
+  const w = size || 44;
+  return el("span", { class: "ring", html: '<svg viewBox="0 0 36 36" width="' + w + '" height="' + w + '" aria-hidden="true">' + segs.join("") + '</svg><b>' + n + "/" + total + "</b>" });
+}
+function bar(pct, cls) { return el("div", { class: "bar " + (cls || "") }, el("i", { style: "width:" + Math.max(0, Math.min(100, pct)) + "%" })); }
+function sparkline(vals) {
+  const w = 7 * 12, h = 28;
+  const pts = vals.map((v, i) => v ? '<rect x="' + (i * 12 + 2) + '" y="' + (h - v * 5) + '" width="8" height="' + v * 5 + '" rx="2" fill="' + (v <= 2 ? "var(--good)" : v === 3 ? "var(--warn)" : "var(--bad)") + '"/>' : '<rect x="' + (i * 12 + 2) + '" y="' + (h - 2) + '" width="8" height="2" rx="1" fill="var(--line)"/>').join("");
+  return el("span", { class: "spark", html: '<svg viewBox="0 0 ' + w + " " + h + '" width="' + w + '" height="' + h + '" aria-label="Bite meter this week">' + pts + "</svg>" });
+}
 
 /* ---------- header ---------- */
 function renderHeader() {
@@ -199,6 +233,13 @@ function renderHeader() {
   if (born) { const days = Math.round((today - born) / 864e5); if (days >= 0) line += " · " + Math.floor(days / 7) + " weeks old"; }
   $("#pupAge").textContent = line;
   $("#gear").hidden = !st;
+  const badge = $("#badge");
+  const url = store && S.photo ? store.photoUrl() : null;
+  if (url) { badge.innerHTML = ""; badge.append(el("img", { src: url, alt: pupName() })); badge.classList.add("photo"); }
+  else { badge.classList.remove("photo"); badge.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="#4f3ddc"><ellipse cx="7" cy="8.5" rx="2.2" ry="3"/><ellipse cx="17" cy="8.5" rx="2.2" ry="3"/><ellipse cx="3.6" cy="13" rx="1.9" ry="2.6"/><ellipse cx="20.4" cy="13" rx="1.9" ry="2.6"/><path d="M12 11.5c-3.2 0-6 2.8-6 5.6 0 1.8 1.3 2.9 3 2.9 1 0 1.9-.5 3-.5s2 .5 3 .5c1.7 0 3-1.1 3-2.9 0-2.8-2.8-5.6-6-5.6z"/></svg>'; }
+  const chip = $("#meChip"); const m = me();
+  chip.hidden = !st || !m;
+  if (m) { chip.replaceChildren(avatar(m, "sm"), el("span", { text: m.name })); chip.setAttribute("aria-label", "This phone is " + m.name + ". Tap to switch."); }
 }
 
 /* ---------- PIN screen ---------- */
@@ -234,46 +275,75 @@ function renderPin() {
   show("pin");
 }
 
+/* ---------- who's this phone ---------- */
+function renderWho() {
+  const P = $("#p-who"); P.replaceChildren();
+  P.append(el("div", { class: "card focus" }, [el("div", { class: "eyebrow", text: "Whose phone is this?" }), el("h2", { class: "h2", text: "Pick yourself" }),
+    el("p", { class: "note", style: "margin-top:6px", text: "Your ticks, streak and badges go to you. Tap your name in the top bar any time to switch." })]));
+  const grid = el("div", { class: "who-grid" });
+  family().forEach((p) => grid.append(el("button", { class: "who", style: "--c:" + colorOf(p), onclick: () => { setMe(p.id); buzz(); renderHeader(); renderAll(); show(current); } }, [avatar(p, "lg"), el("b", { text: p.name }), el("small", { text: C.kinds[p.kind] ? C.kinds[p.kind].name : "" })])));
+  P.append(grid);
+  show("who");
+}
+
 /* ---------- settings / setup ---------- */
+function resizeImage(file) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const size = 320, c = document.createElement("canvas"); c.width = size; c.height = size;
+      const ctx = c.getContext("2d");
+      const s = Math.min(img.width, img.height), sx = (img.width - s) / 2, sy = (img.height - s) / 2;
+      ctx.drawImage(img, sx, sy, s, s, 0, 0, size, size);
+      let q = 0.86, out = c.toDataURL("image/jpeg", q);
+      while (out.length > 300 * 1024 && q > 0.4) { q -= 0.1; out = c.toDataURL("image/jpeg", q); }
+      URL.revokeObjectURL(img.src); resolve(out);
+    };
+    img.onerror = () => reject(new Error("Couldn't read that photo"));
+    img.src = URL.createObjectURL(file);
+  });
+}
 function renderSettings(firstRun) {
   const P = $("#p-settings"); P.replaceChildren();
-  const st = S.settings || { puppy: { name: "", sex: "girl", breed: "", born: "" }, start: iso(today), family: [{ id: "p1", name: "", role: "manners" }] };
+  const st = S.settings || { puppy: { name: "", sex: "girl", breed: "", born: "" }, start: iso(today), family: [{ id: "p1", name: "", kind: "kid", target: 21, age: "" }] };
   const fam = JSON.parse(JSON.stringify(st.family));
-  const roleSel = (p) => el("select", { "aria-label": "Role", onchange: (e) => (p.role = e.target.value) },
-    Object.keys(C.roles).map((r) => el("option", { value: r, selected: p.role === r, text: C.roles[r].name })));
+  const kindSel = (p) => el("select", { "aria-label": "Kid or grown-up", onchange: (e) => { p.kind = e.target.value; if (!p.touched) p.target = C.kinds[p.kind].target; drawFam(); } },
+    Object.keys(C.kinds).map((k) => el("option", { value: k, selected: p.kind === k, text: C.kinds[k].name })));
+  const ageSel = (p) => el("select", { "aria-label": "Age", onchange: (e) => (p.age = e.target.value) },
+    ["", "5-7", "8-9", "10-11", "12-14", "15+"].map((a) => el("option", { value: a, selected: (p.age || "") === a, text: a ? "Age " + a : "Age (optional)" })));
   const famBox = el("div", { style: "display:grid;gap:8px" });
   const drawFam = () => {
-    famBox.replaceChildren(...fam.map((p, i) => el("div", { class: "fam-row" }, [
-      el("div", { class: "av", style: "--c:" + PCOL[i % PCOL.length], text: (p.name || "?")[0].toUpperCase() }),
+    famBox.replaceChildren(...fam.map((p, i) => el("div", { class: "fam-row", style: "--c:" + PCOL[i % PCOL.length] }, [
+      el("span", { class: "av", "aria-hidden": "true", text: (p.name || "?")[0].toUpperCase() }),
       el("div", { class: "fields" }, [
         el("input", { type: "text", id: "fam-" + p.id, maxlength: "20", placeholder: "Name", value: p.name, "aria-label": "Name", oninput: (e) => (p.name = e.target.value) }),
-        el("div", { class: "row2" }, [roleSel(p), fam.length > 1 ? el("button", { class: "btn ghost small", type: "button", onclick: () => { fam.splice(i, 1); drawFam(); }, text: "Remove" }) : null])
-      ])
+        el("div", { class: "row" }, [kindSel(p), p.kind === "kid" ? ageSel(p) : null,
+          el("label", { class: "target" }, ["Goal ", el("input", { type: "number", min: "1", max: "30", value: p.target || C.kinds[p.kind].target, "aria-label": "Sessions a week", oninput: (e) => { p.target = Number(e.target.value); p.touched = true; } }), " a week"])]),
+      ]),
+      fam.length > 1 ? el("button", { class: "iconbtn", type: "button", "aria-label": "Remove " + (p.name || "person"), text: "✕", onclick: () => { fam.splice(i, 1); drawFam(); } }) : null
     ])));
   };
   drawFam();
   const addBtn = el("button", { class: "btn ghost", type: "button", text: "+ Add a person", onclick: () => {
     if (fam.length >= 6) { toast("Up to 6 people"); return; }
-    fam.push({ id: "p" + Date.now().toString(36), name: "", role: "helper" }); drawFam();
+    fam.push({ id: "p" + Date.now().toString(36), name: "", kind: "kid", target: 21, age: "" }); drawFam();
   } });
-  const f = (id, label, input) => el("div", { class: "field" }, [el("label", { for: id, text: label }), input]);
+  const f = (id, label, input, extra) => el("div", { class: "field" }, [el("label", { for: id, text: label }), input, extra]);
   const name = el("input", { type: "text", id: "set-name", maxlength: "24", value: st.puppy.name, placeholder: "e.g. Pepper" });
   const sex = el("select", { id: "set-sex" }, [el("option", { value: "girl", selected: st.puppy.sex !== "boy", text: "Girl" }), el("option", { value: "boy", selected: st.puppy.sex === "boy", text: "Boy" })]);
   const breed = el("input", { type: "text", id: "set-breed", maxlength: "80", value: st.puppy.breed, placeholder: "e.g. German Shorthaired Pointer × heading dog" });
   const born = el("input", { type: "date", id: "set-born", value: st.puppy.born || "" });
   const start = el("input", { type: "date", id: "set-start", value: st.start || iso(today) });
-  // The browser shows date pickers in the phone's own locale (dd/mm or mm/dd), so spell the chosen date out in words underneath.
   const dateWords = (input, empty) => {
     const out = el("small", { class: "date-words" });
     const draw = () => { const d = input.value ? new Date(input.value + "T12:00:00") : null; out.textContent = d && !isNaN(d) ? d.toLocaleDateString("en-NZ", { weekday: "long", day: "numeric", month: "long", year: "numeric" }) : empty; };
     input.addEventListener("input", draw); draw(); return out;
   };
-  const bornWords = dateWords(born, "Not set"), startWords = dateWords(start, "");
   const save = el("button", { class: "btn", type: "button", text: firstRun ? "Start training" : "Save", onclick: async () => {
-    const famClean = fam.map((p) => ({ id: p.id, name: p.name.trim().slice(0, 20), role: p.role })).filter((p) => p.name);
+    const famClean = fam.map((p) => ({ id: p.id, name: p.name.trim().slice(0, 20), kind: p.kind, age: p.age || "", target: Math.max(1, Math.min(30, Number(p.target) || C.kinds[p.kind].target)) })).filter((p) => p.name);
     if (!famClean.length) { toast("Add at least one person"); return; }
     const next = { puppy: { name: name.value.trim().slice(0, 24), sex: sex.value, breed: breed.value.trim().slice(0, 80), born: born.value }, start: start.value || iso(today), family: famClean };
-    try { await store.saveSettings(next); toast("Saved"); show(firstRun ? "today" : current); } catch (e) { toast("Couldn't save. Check your connection."); }
+    await safe(async () => { await store.saveSettings(next); toast("Saved"); if (!me()) renderWho(); else show(firstRun ? "today" : current); });
   } });
   P.append(
     el("div", { class: "card focus" }, [el("div", { class: "eyebrow", text: firstRun ? "Welcome" : "Settings" }),
@@ -282,112 +352,315 @@ function renderSettings(firstRun) {
     el("div", { class: "card", style: "display:grid;gap:12px" }, [
       f("set-name", "Puppy's name", name),
       el("div", { class: "row" }, [el("div", { class: "field", style: "flex:1;min-width:120px" }, [el("label", { for: "set-sex", text: "Girl or boy" }), sex]),
-        el("div", { class: "field", style: "flex:2;min-width:160px" }, [el("label", { for: "set-born", text: "Birthday (roughly)" }), born, bornWords])]),
+        el("div", { class: "field", style: "flex:2;min-width:160px" }, [el("label", { for: "set-born", text: "Birthday (roughly)" }), born, dateWords(born, "Not set")])]),
       f("set-breed", "Breed", breed),
-      el("div", { class: "field" }, [el("label", { for: "set-start", text: "Plan starts" }), start, startWords])
-    ]),
+      f("set-start", "Plan starts", start, dateWords(start, ""))
+    ]));
+  if (!firstRun) {
+    const photoCard = el("div", { class: "card", style: "display:grid;gap:10px" }, [el("div", { class: "eyebrow", text: pupName() + "'s photo" })]);
+    const prev = el("div", { class: "photo-prev" + (S.photo ? " has" : "") });
+    if (S.photo) prev.append(el("img", { src: store.photoUrl(), alt: "" })); else prev.textContent = "🐶";
+    const file = el("input", { type: "file", accept: "image/*", id: "set-photo", hidden: true, onchange: async (e) => {
+      const fl = e.target.files && e.target.files[0]; if (!fl) return;
+      await safe(async () => { const data = await resizeImage(fl); await store.setPhoto(data); renderHeader(); renderSettings(false); }, "Photo saved");
+    } });
+    photoCard.append(el("div", { class: "row" }, [prev, el("div", { style: "display:grid;gap:6px" }, [
+      el("button", { class: "btn ghost", type: "button", text: S.photo ? "Change photo" : "Add a photo", onclick: () => file.click() }),
+      S.photo ? el("button", { class: "btn ghost", type: "button", text: "Remove", onclick: () => safe(async () => { await store.setPhoto(null); renderHeader(); renderSettings(false); }) }) : null,
+      el("small", { class: "note", text: "Shows in the top corner on every phone. Square crop, kept small." })]), file]));
+    P.append(photoCard);
+  }
+  P.append(
     el("div", { class: "eyebrow", text: "Who's training" }),
     el("div", { class: "card", style: "display:grid;gap:10px" }, [famBox, addBtn,
-      el("p", { class: "note", text: "Each person gets three 5-minute sessions a day on the chart. Roles decide who leads which skills." })]),
+      el("p", { class: "note", text: "Everyone gets three 5-minute sessions a day on the chart and does every skill. The weekly goal is what your streak and progress are measured against: kids 21, grown-ups 10 by default." })]),
     el("div", { class: "row" }, [save, firstRun ? null : el("button", { class: "btn ghost", type: "button", text: "Cancel", onclick: () => show(current) })])
   );
   if (!firstRun) {
-    const info = el("div", { class: "card", style: "display:grid;gap:8px" }, [el("div", { class: "eyebrow", text: "Saving" })]);
-    if (store.mode === "server") info.append(el("p", { text: "Ticks sync to everyone who has the family PIN." }), el("div", {}, el("button", { class: "btn ghost", type: "button", text: "Lock this phone", onclick: () => store.logout() })));
-    else if (store.mode === "claude") info.append(el("p", { text: store.canWrite ? "Ticks sync to everyone signed in to this page." : "You can see the family chart but this account can't save to it." }));
-    else info.append(el("p", { text: "Ticks are saved on this phone only. To share one chart with the whole family, self-host it with a family PIN (see the project README)." }));
-    P.append(info);
+    const themeNow = lsGet("pt.theme", "system");
+    const seg = el("div", { class: "seg", role: "radiogroup", "aria-label": "Appearance" }, [["system", "Auto"], ["light", "Light"], ["dark", "Dark"]].map(([v, l]) =>
+      el("button", { type: "button", role: "radio", "aria-checked": themeNow === v ? "true" : "false", text: l, onclick: (e) => { lsSet("pt.theme", v); applyTheme(); e.target.parentNode.querySelectorAll("button").forEach((b) => b.setAttribute("aria-checked", b === e.target ? "true" : "false")); } })));
+    const whoSel = el("select", { "aria-label": "This phone belongs to" }, family().map((p) => el("option", { value: p.id, selected: p.id === meId, text: p.name })));
+    whoSel.addEventListener("change", (e) => { setMe(e.target.value); renderHeader(); renderAll(); toast("This phone is now " + person(meId).name + "'s"); });
+    const info = el("div", { class: "card", style: "display:grid;gap:10px" }, [
+      el("div", { class: "field" }, [el("label", { text: "Whose phone is this?" }), whoSel]),
+      el("div", { class: "field" }, [el("label", { text: "Appearance" }), seg]),
+      el("div", { class: "row" }, [
+        el("button", { class: "btn ghost", type: "button", text: "Export the chart (JSON)", onclick: () => {
+          const blob = new Blob([JSON.stringify(store.exportJson(), null, 2)], { type: "application/json" });
+          const a = el("a", { href: URL.createObjectURL(blob), download: "puppy-school-" + iso(today) + ".json" }); document.body.append(a); a.click(); a.remove();
+        } }),
+        store.mode === "server" ? el("button", { class: "btn ghost", type: "button", text: "Lock this phone", onclick: () => store.logout() }) : null]),
+      el("p", { class: "note", text: store.mode === "server" ? "Ticks sync to everyone who has the family PIN. Changing the PIN on the server signs every phone out." : "Ticks are saved on this phone only. To share one chart with the whole family, self-host it with a family PIN (see the project README)." })]);
+    P.append(el("div", { class: "eyebrow", text: "This phone" }), info);
   }
 }
 
 /* ---------- today ---------- */
+function slotButton(d, p, slot, big) {
+  const k = tickKey(d, p.id, slot.id), t = S.ticks[k], on = !!t && !t.void;
+  const m = me(); const own = m && m.id === p.id;
+  const past = viewDay < today, future = viewDay > today;
+  const mission = S.scores && S.scores.missions[p.id] && S.scores.missions[p.id][slot.id];
+  const sk = on && t.skill ? skillById(t.skill) : mission ? skillById(mission.skill) : null;
+  const disabled = future || (past && !isAdult(m));
+  const label = p.name + " " + slot.t + (on ? ", done" : ", not done");
+  const b = el("button", { class: "slot" + (big ? " big" : ""), "aria-pressed": on ? "true" : "false", "aria-label": label, disabled, onclick: async () => {
+    if (!m) { renderWho(); return; }
+    if (on) {
+      const mins = (Date.now() - (t.at || 0)) / 60000;
+      if (!own && !isAdult(m) && mins > 15) { toast("Only " + p.name + " or a grown-up can undo that"); return; }
+      await safe(() => store.setTick(k, false)); return;
+    }
+    if (!own && !confirm("Log this " + slot.t.toLowerCase() + " session for " + p.name + "?")) return;
+    await safe(async () => { await store.setTick(k, true, { by: m.id, skill: sk ? sk.id : undefined }); buzz(); toast(own ? "Nice one, " + p.name + "! +" + C.points.session : "Logged for " + p.name + " by " + m.name); });
+  } }, [
+    el("span", { class: "t", text: (on ? "✓ " : "") + slot.t }),
+    big ? el("span", { class: "sk", text: sk ? T(sk.nm) : slot.s }) : el("span", { text: on && t.by && t.by !== p.id && person(t.by) ? "by " + person(t.by).name : slot.s })
+  ]);
+  if (big && mission && !on) b.title = "Mission: " + (sk ? sk.nm : "");
+  if (big && on && (own || isAdult(m)) && S.scores) {
+    const openSkills = C.skills.filter((x) => S.scores.skills[x.id].open);
+    const sel = el("select", { class: "skillsel", "aria-label": "Which skill was this session?", onclick: (e) => e.stopPropagation(), onchange: async (e) => {
+      e.stopPropagation();
+      await safe(() => store.setTick(k, true, { by: t.by || m.id, skill: e.target.value }), "Changed to " + T(skillById(e.target.value).nm));
+    } }, openSkills.map((x) => el("option", { value: x.id, selected: sk && sk.id === x.id, text: T(x.nm) })));
+    return el("div", { class: "slotwrap" }, [b, sel]);
+  }
+  return b;
+}
 function renderToday() {
   const P = $("#p-today"); P.replaceChildren();
-  let wi = weekIndex(viewDay); const before = wi < 0; wi = Math.max(0, Math.min(C.weeks.length - 1, wi));
-  const w = C.weeks[wi];
-  const chips = el("div", { class: "chips" }, w.skills.map((id) => { const sk = C.skills.find((s) => s.id === id); return sk ? el("button", { class: "chip", text: T(sk.nm), onclick: () => openAcc("sk-" + id, "skills") }) : null; }));
-  P.append(el("div", { class: "card focus" }, [
-    el("div", { class: "eyebrow", text: before ? "Plan starts " + fmt(startDate()) : "Week " + (wi + 1) + " of " + C.weeks.length }),
-    el("h2", { text: w.title }), chips]));
+  const sc = S.scores; const m = me();
+  const d = iso(viewDay); const isToday = d === iso(today);
 
-  const isToday = iso(viewDay) === iso(today);
+  // the puppy's progress: the shared number
+  if (sc) {
+    const pl = sc.puppy.level;
+    P.append(el("div", { class: "card hero", style: "--c:var(--blaze)" }, [
+      el("div", { class: "row", style: "justify-content:space-between;align-items:flex-start" }, [
+        el("div", {}, [el("div", { class: "eyebrow", text: pupName() + "'s progress" }), el("h2", { text: "Level " + pl.n + ": " + pl.name })]),
+        sparkline(sc.biteWeek)]),
+      bar(pl.pct, "big"),
+      el("div", { class: "row small muted", style: "justify-content:space-between" }, [
+        el("span", { text: pl.next ? (pl.next - sc.puppy.points) + " to " + pl.nextName : "Top level!" }),
+        el("span", { text: sc.puppy.mastered + " of " + sc.puppy.total + " skills · " + sc.puppy.sessions + " sessions" })])
+    ]));
+  }
+
+  // day bar
   P.append(el("div", { class: "daybar" }, [
     el("button", { class: "iconbtn", "aria-label": "Previous day", text: "‹", onclick: () => { viewDay = addDays(viewDay, -1); renderToday(); } }),
     el("h2", { text: (isToday ? "Today · " : "") + fmt(viewDay) }),
     el("button", { class: "iconbtn", "aria-label": "Next day", text: "›", disabled: isToday, onclick: () => { if (viewDay < today) { viewDay = addDays(viewDay, 1); renderToday(); } } })
   ]));
-  P.append(el("p", { class: "note", text: "Tap a box after each 5-minute session. Tap again to undo." }));
+  if (viewDay < today && !isAdult(m)) P.append(el("p", { class: "note", text: "Past days can only be changed by a grown-up." }));
 
-  const d = iso(viewDay);
+  // my missions
+  if (m && isToday) {
+    const my = scoreOf(m.id);
+    const card = el("div", { class: "card mine", style: "--c:" + colorOf(m) }, [
+      el("div", { class: "row", style: "justify-content:space-between" }, [
+        el("div", { class: "who" }, [avatar(m), el("div", {}, [el("b", { text: "Your missions, " + m.name }), el("small", { text: my ? (my.streak ? "🔥 " + my.streak + "-day streak" + (my.atRisk ? " (train today to keep it)" : "") : "Start a streak today") : "" })])]),
+        my ? ring(my.today, 3, 48, colorOf(m)) : null]),
+      el("div", { class: "slots" }, C.slots.map((s) => slotButton(d, m, s, true))),
+      el("p", { class: "note", text: "Each mission is one skill the dealer picked for you. Warm up with something " + T("she") + " knows, 2 minutes on the mission, finish on a win. Did a different skill? Change it under the tick." })
+    ]);
+    P.append(card);
+  } else if (!m && S.settings) {
+    P.append(el("div", { class: "card" }, [el("b", { text: "Whose phone is this?" }), el("p", { class: "note", text: "Pick yourself so your sessions count for you." }), el("button", { class: "btn", type: "button", text: "Pick me", onclick: renderWho })]));
+  }
+
+  // everyone
   const people = el("div", { class: "people" });
   family().forEach((p) => {
-    const c = colorOf(p);
-    const n = C.slots.filter((s) => S.ticks.has(tickKey(d, p.id, s.id))).length;
-    const row = el("div", { class: "prow", style: "--c:" + c }, [
-      el("div", { class: "who", style: "grid-column:1/3" }, [el("div", { class: "av", text: p.name[0].toUpperCase() }), el("div", {}, [el("b", { text: p.name }), el("small", { text: (C.roles[p.role] || C.roles.helper).name })])]),
-      el("div", { class: "mins-today", text: n * 5 + " min" })
+    if (m && p.id === m.id && isToday) return;
+    const ps = scoreOf(p.id);
+    const row = el("div", { class: "prow", style: "--c:" + colorOf(p) }, [
+      el("div", { class: "who" }, [avatar(p), el("div", {}, [el("b", { text: p.name }), el("small", { text: ps ? (ps.streak ? "🔥 " + ps.streak + " · " : "") + "Lv " + ps.level.n + " " + ps.level.name : "" })])]),
+      ps && isToday ? ring(ps.today, 3, 40, colorOf(p)) : el("div", { class: "mins-today", text: C.slots.filter((s) => S.ticks[tickKey(d, p.id, s.id)]).length * 5 + " min" })
     ]);
-    const slots = el("div", { class: "slots" });
-    C.slots.forEach((s) => {
-      const k = tickKey(d, p.id, s.id), on = S.ticks.has(k);
-      slots.append(el("button", { class: "slot", "aria-pressed": on ? "true" : "false", "aria-label": p.name + " " + s.t + (on ? ", done" : ", not done"), disabled: viewDay > today,
-        onclick: async () => { await store.setTick(k, !on); if (!on) toast("Nice one, " + p.name + "! +5 min"); } },
-        [el("span", { class: "t", text: (on ? "✓ " : "") + s.t }), el("span", { text: s.s })]));
-    });
-    row.append(slots); people.append(row);
+    row.append(el("div", { class: "slots" }, C.slots.map((s) => slotButton(d, p, s, false))));
+    people.append(row);
   });
-  P.append(people);
+  P.append(el("div", { class: "eyebrow", text: m && isToday ? "The rest of the pack" : "Everyone" }), people);
 
+  // bite meter
   const cur = S.logs[d] && S.logs[d].bite;
   P.append(el("div", { class: "card" }, [
     el("div", { class: "row", style: "justify-content:space-between" }, [el("div", { class: "eyebrow", text: T("How bitey was she today?") }),
       el("button", { class: "chip", text: "Biting plan →", onclick: () => show("help") })]),
-    el("div", { class: "meter" }, BITE.map(([e, l], i) => el("button", { "aria-pressed": cur === i + 1 ? "true" : "false", disabled: viewDay > today, onclick: () => store.setLog(d, { bite: cur === i + 1 ? 0 : i + 1 }) }, [el("span", { class: "e", text: e }), el("span", { text: l })])))
+    el("div", { class: "meter" }, BITE.map(([e, l], i) => el("button", { "aria-pressed": cur === i + 1 ? "true" : "false", disabled: viewDay > today, onclick: () => safe(() => store.setLog(d, { bite: cur === i + 1 ? 0 : i + 1, by: m ? m.id : undefined })) }, [el("span", { class: "e", text: e }), el("span", { text: l })]))),
+    S.logs[d] && S.logs[d].by && person(S.logs[d].by) ? el("small", { class: "note", text: "Rated by " + person(S.logs[d].by).name }) : null
   ]));
 
-  // week table (Mon start)
+  // toilet
+  if (isToday && sc) renderToilet(P, sc, m);
+
+  // the week
   const off = (viewDay.getDay() + 6) % 7, mon = addDays(viewDay, -off);
   const days = [...Array(7)].map((_, i) => addDays(mon, i));
   const t = el("table", { class: "week" });
-  t.append(el("thead", {}, el("tr", {}, [el("th", { text: "" }), ...days.map((x) => el("th", { class: iso(x) === iso(today) ? "today" : "", text: DAYS[x.getDay()].slice(0, 2) })), el("th", { text: "Min" })])));
+  t.append(el("thead", {}, el("tr", {}, [el("th", { text: "" }), ...days.map((x) => el("th", { class: iso(x) === iso(today) ? "today" : "", text: DAYS[x.getDay()].slice(0, 2) })), el("th", { text: "Goal" })])));
   const tb = el("tbody");
   family().forEach((p) => {
     let tot = 0;
     const tr = el("tr", { style: "--c:" + colorOf(p) }, el("td", { text: p.name }));
-    days.forEach((x) => { const ds = el("span", { class: "dots" }); C.slots.forEach((s) => { const on = S.ticks.has(tickKey(iso(x), p.id, s.id)); if (on) tot++; ds.append(el("i", { class: on ? "on" : "" })); }); tr.append(el("td", { class: iso(x) === iso(today) ? "today" : "" }, ds)); });
-    tr.append(el("td", { class: "mins", text: String(tot * 5) })); tb.append(tr);
+    days.forEach((x) => { const ds = el("span", { class: "dots" }); C.slots.forEach((s) => { const on = !!S.ticks[tickKey(iso(x), p.id, s.id)]; if (on) tot++; ds.append(el("i", { class: on ? "on" : "" })); }); tr.append(el("td", { class: iso(x) === iso(today) ? "today" : "" }, ds)); });
+    const ps = scoreOf(p.id);
+    tr.append(el("td", { class: "mins", text: tot + "/" + (ps ? ps.target : "") })); tb.append(tr);
   });
   const br = el("tr", {}, el("td", { text: "Biting" }));
   days.forEach((x) => { const b = S.logs[iso(x)] && S.logs[iso(x)].bite; br.append(el("td", { class: iso(x) === iso(today) ? "today" : "", title: b ? BITE[b - 1][1] : "", text: b ? BITE[b - 1][0] : "·" })); });
   br.append(el("td", { text: "" })); tb.append(br);
   t.append(tb);
-  P.append(el("div", { class: "card" }, [el("div", { class: "eyebrow", text: "This week" }), el("div", { class: "tbl-wrap" }, t)]));
-  const note = store.mode === "local" ? "Saved on this phone." : store.mode === "server" ? "Synced with the family." : store.canWrite ? "Synced with everyone signed in." : "View only on this account.";
-  P.append(el("p", { class: "note", text: note }));
+  P.append(el("div", { class: "card" }, [el("div", { class: "row", style: "justify-content:space-between" }, [el("div", { class: "eyebrow", text: "This week" }), sc ? el("small", { class: "muted", text: "Pack: " + sc.pack.weekSessions + " of " + sc.pack.weekTarget + " sessions" }) : null]), el("div", { class: "tbl-wrap" }, t)]));
+  P.append(el("p", { class: "note", text: store.mode === "local" ? "Saved on this phone." : "Synced with the family." }));
+}
+function renderToilet(P, sc, m) {
+  const tl = sc.toilet;
+  const card = el("div", { class: "card toilet" }, [el("div", { class: "row", style: "justify-content:space-between" }, [el("div", { class: "eyebrow", text: "Toilet" }),
+    el("small", { class: "muted", text: tl.lastOut ? "Last trip out " + ago(tl.lastOut.at) : "No trips logged yet" })])]);
+  if (tl.lastOut) {
+    const due = Math.min(tl.lastOut.at, Date.now()) + tl.interval * 60000 - Date.now();
+    const mins = Math.round(due / 60000);
+    card.append(el("p", { class: "due" + (mins <= 0 ? " now" : mins <= 10 ? " soon" : ""), text: mins <= 0 ? "Due now: take " + T("her") + " out" : "Next trip in about " + mins + " min" + (tl.ageWeeks < 14 ? " (hourly at this age, plus after naps, meals and play)" : "") }));
+  } else card.append(el("p", { class: "note", text: "At " + tl.ageWeeks + " weeks: out on waking, after meals, after play, and about every " + tl.interval + " minutes awake. Log each trip and the app will tell you when the next one is due." }));
+  let pendingKind = null;
+  const beforeRow = el("div", { class: "chips", hidden: true });
+  const kinds = el("div", { class: "tbtns" }, C.toiletKinds.map(([k, l]) => el("button", { class: "tbtn " + k, type: "button", text: (k === "wee" ? "💧 " : k === "poo" ? "💩 " : "⚠️ ") + l, onclick: () => {
+    pendingKind = k; beforeRow.hidden = false; kinds.querySelectorAll("button").forEach((b) => b.classList.toggle("sel", b.textContent.includes(l)));
+  } })));
+  const log = async (before) => {
+    if (!pendingKind) return;
+    const k = pendingKind; pendingKind = null; beforeRow.hidden = true;
+    await safe(async () => { await store.addToilet({ kind: k, before, by: m ? m.id : undefined }); buzz(); }, k === "accident" ? "Logged. No fuss, just clean up and go again sooner." : "Logged. Good " + T("girl") + "!");
+  };
+  beforeRow.append(el("small", { text: "What came before?" }), ...C.toiletBefore.map(([k, l]) => el("button", { class: "chip", type: "button", text: l, onclick: () => log(k) })), el("button", { class: "chip", type: "button", text: "Skip", onclick: () => log("") }));
+  card.append(kinds, beforeRow);
+  const todayList = tl.today.slice(-6).reverse();
+  if (todayList.length) card.append(el("div", { class: "tlist" }, todayList.map((t) => el("div", { class: "row small" }, [
+    el("span", { text: (t.kind === "wee" ? "💧" : t.kind === "poo" ? "💩" : "⚠️") + " " + new Date(t.at).toLocaleTimeString("en-NZ", { hour: "numeric", minute: "2-digit" }) + (t.before ? " · " + (C.toiletBefore.find((b) => b[0] === t.before) || ["", ""])[1].toLowerCase() : "") + (t.by && person(t.by) ? " · " + person(t.by).name : "") }),
+    el("button", { class: "linkbtn", type: "button", text: "undo", onclick: () => safe(() => store.voidToilet(t.id)) })]))));
+  const worst = Object.entries(tl.accidentsAfter).sort((a, b) => b[1] - a[1])[0];
+  if (worst && worst[1] >= 2) card.append(el("p", { class: "note", text: "Pattern: most accidents happen " + (C.toiletBefore.find((b) => b[0] === worst[0]) || ["", ""])[1].toLowerCase() + ". Take " + T("her") + " out straight after that." }));
+  P.append(card);
+}
+
+/* ---------- celebrations ---------- */
+function confetti() {
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const box = el("div", { class: "confetti", "aria-hidden": "true" });
+  const cols = ["var(--blaze)", "var(--p1)", "var(--p2)", "var(--p3)", "var(--p5)", "var(--good)"];
+  for (let i = 0; i < 60; i++) box.append(el("i", { style: "left:" + Math.random() * 100 + "%;background:" + cols[i % cols.length] + ";animation-delay:" + Math.random() * 0.6 + "s;animation-duration:" + (1.6 + Math.random()) + "s;transform:rotate(" + Math.random() * 360 + "deg)" }));
+  document.body.append(box); setTimeout(() => box.remove(), 3000);
+}
+function celebrate(title, sub, emoji) {
+  const ov = el("div", { class: "celebrate", role: "dialog", "aria-modal": "true" }, el("div", { class: "cbox" }, [el("div", { class: "cemoji", text: emoji || "🎉" }), el("h2", { text: title }), el("p", { text: sub }), el("button", { class: "btn", type: "button", text: "Nice!", onclick: () => ov.remove() })]));
+  ov.addEventListener("click", (e) => { if (e.target === ov) ov.remove(); });
+  document.body.append(ov); confetti(); buzz([30, 40, 30]);
+}
+function checkCelebrations() {
+  const m = me(); const sc = m && scoreOf(m.id); if (!sc) return;
+  const key = "pt.seen." + m.id;
+  const seen = lsGet(key, null);
+  const nowSeen = { badges: sc.badges, level: sc.level.n, streak7: sc.streak >= 7 };
+  if (seen) {
+    const newBadge = sc.badges.find((b) => !seen.badges.includes(b));
+    if (sc.level.n > seen.level) celebrate("Level " + sc.level.n + ": " + sc.level.name, m.name + ", you levelled up. " + pupName() + " approves.", "⭐");
+    else if (newBadge) { const B = C.badges.find((b) => b.id === newBadge); if (B) celebrate(B.nm, B.how, B.e); }
+    else if ([7, 14, 30].includes(sc.streak) && sc.streak !== seen.lastStreak) celebrate(sc.streak + "-day streak!", "That's " + sc.streak + " days in a row. " + pupName() + " is getting the idea too.", "🔥");
+  }
+  nowSeen.lastStreak = sc.streak;
+  lsSet(key, nowSeen);
+}
+
+/* ---------- pack (rewards) ---------- */
+function renderPack() {
+  const P = $("#p-pack"); P.replaceChildren();
+  const sc = S.scores; if (!sc) return;
+  const m = me();
+  P.append(el("div", { class: "card focus" }, [el("div", { class: "eyebrow", text: "The pack" }), el("h2", { class: "h2", text: "Everyone trains, " + pupName() + " wins" }),
+    el("p", { class: "note", style: "margin-top:6px", text: "Points for showing up, streaks with two free passes a week, badges for the good stuff. The podium ranks by percent of your own weekly goal, so a kid on 21 and a grown-up on 10 race fairly, and it resets every Sunday." })]));
+  // pack streak + week
+  P.append(el("div", { class: "card" }, [
+    el("div", { class: "row", style: "justify-content:space-between" }, [el("div", {}, [el("div", { class: "eyebrow", text: "Pack streak" }), el("h3", { text: sc.pack.streak + " day" + (sc.pack.streak === 1 ? "" : "s") + " where everyone trained" })]), el("span", { class: "bigemoji", text: sc.pack.streak >= 7 ? "🐾🔥" : "🐾" })]),
+    el("small", { class: "muted", text: "Best run: " + sc.pack.best + ". This week the pack has done " + sc.pack.weekSessions + " of " + sc.pack.weekTarget + " sessions." }),
+    bar(sc.pack.weekTarget ? (sc.pack.weekSessions / sc.pack.weekTarget) * 100 : 0, "")
+  ]));
+  // the podium: ranked by percent of your own goal, so a kid with 21 and a parent with 10 race fairly. Resets Sunday.
+  const ranked = family().map((p) => ({ p, s: scoreOf(p.id) })).filter((x) => x.s).sort((a, b) => b.s.weekPct - a.s.weekPct || b.s.weekSessions - a.s.weekSessions || a.p.name.localeCompare(b.p.name));
+  const medals = ["🥇", "🥈", "🥉"];
+  P.append(el("div", { class: "card", style: "display:grid;gap:8px" }, [
+    el("div", { class: "row", style: "justify-content:space-between" }, [el("div", { class: "eyebrow", text: "This week's podium" }), el("small", { class: "muted", text: "Percent of your own goal. Resets Sunday night." })]),
+    el("div", { class: "podium" }, ranked.map((x, i) => el("div", { class: "prow", style: "--c:" + colorOf(x.p) }, [
+      el("span", { class: "rank", text: medals[i] || String(i + 1) }),
+      el("div", { class: "who" }, [avatar(x.p), el("div", {}, [el("b", { text: x.p.name }), el("small", { text: x.s.weekSessions + " of " + x.s.target + (x.s.streak ? " · 🔥 " + x.s.streak : "") })])]),
+      el("span", { class: "pct", text: x.s.weekPct + "%" })])))
+  ]));
+  // kids vs grown-ups
+  const kids = family().filter((p) => p.kind !== "adult"), adults = family().filter((p) => p.kind === "adult");
+  if (kids.length && adults.length) {
+    const pct = (L) => { const t = L.reduce((a, p) => a + (scoreOf(p.id) ? scoreOf(p.id).target : 0), 0); const n = L.reduce((a, p) => a + (scoreOf(p.id) ? scoreOf(p.id).weekSessions : 0), 0); return t ? Math.round((n / t) * 100) : 0; };
+    const kp = pct(kids), ap = pct(adults);
+    P.append(el("div", { class: "card", style: "display:grid;gap:8px" }, [el("div", { class: "eyebrow", text: "Kids vs grown-ups" }),
+      el("div", { class: "teams" }, [
+        el("div", { class: "team" + (kp > ap ? " lead" : "") }, [el("b", { text: kp + "%" }), el("small", { text: "Kids" })]),
+        el("span", { class: "vs", text: "vs" }),
+        el("div", { class: "team" + (ap > kp ? " lead" : "") }, [el("b", { text: ap + "%" }), el("small", { text: "Grown-ups" })])]),
+      el("small", { class: "muted", text: kp === ap ? "Dead heat. Someone go train the dog." : (kp > ap ? "Kids" : "Grown-ups") + " are ahead this week. Losers make the hot chocolate on Sunday." })]));
+  }
+  // people cards, ordered by name
+  const peopleSorted = family().slice().sort((a, b) => a.name.localeCompare(b.name));
+  P.append(el("div", { class: "eyebrow", text: "Everyone, against their own goal" }));
+  P.append(el("div", { class: "people" }, peopleSorted.map((p) => {
+    const ps = scoreOf(p.id); if (!ps) return null;
+    return el("div", { class: "prow pack", style: "--c:" + colorOf(p) }, [
+      el("div", { class: "who" }, [avatar(p), el("div", {}, [el("b", { text: p.name + (m && m.id === p.id ? " (you)" : "") }), el("small", { text: "Level " + ps.level.n + " · " + ps.level.name + " · " + ps.points + " pts" })])]),
+      el("div", { class: "stats" }, [
+        el("span", { class: "stat", text: "🔥 " + ps.streak, title: "Streak" }),
+        el("span", { class: "stat", text: "🧊 " + ps.freezesLeft, title: "Freezes left this week" }),
+        el("span", { class: "stat", text: "🏅 " + ps.badges.length, title: "Badges" })]),
+      el("div", { class: "wk" }, [bar(ps.weekPct, ""), el("small", { class: "muted", text: ps.weekSessions + " of " + ps.target + " this week (" + ps.weekPct + "%) · best week " + ps.bestWeek })]),
+      el("div", { class: "lvl" }, [bar(ps.level.pct, "thin"), el("small", { class: "muted", text: ps.level.next ? (ps.level.next - ps.points) + " pts to " + ps.level.nextName : "Top level" })])
+    ]);
+  })));
+  // badges for the chosen person
+  let who = m || family()[0];
+  const grid = el("div", { class: "badge-grid" });
+  const drawBadges = () => {
+    const ps = scoreOf(who.id); const have = new Set(ps ? ps.badges : []);
+    grid.replaceChildren(...C.badges.map((b) => el("div", { class: "badge" + (have.has(b.id) ? " on" : ""), title: b.how }, [el("span", { class: "be", text: b.e }), el("b", { text: b.nm }), el("small", { text: b.how })])));
+  };
+  const chips = el("div", { class: "chips" }, family().map((p) => el("button", { class: "chip" + (p.id === who.id ? " on" : ""), type: "button", text: p.name, onclick: (e) => { who = p; chips.querySelectorAll(".chip").forEach((c) => c.classList.toggle("on", c === e.target)); drawBadges(); } })));
+  drawBadges();
+  P.append(el("div", { class: "eyebrow", text: "Badges" }), el("div", { class: "card", style: "display:grid;gap:10px" }, [chips, grid]));
+  P.append(el("div", { class: "eyebrow", text: "How points work" }));
+  P.append(el("div", { class: "card" }, el("ul", { class: "plain" }, [
+    el("li", { text: "A session you tick for yourself: " + C.points.session + " points. All three in a day: +" + C.points.fullDay + "." }),
+    el("li", { text: "Confirming a skill's goal (with a witness): " + C.points.mastery + ". Being the witness: " + C.points.witness + "." }),
+    el("li", { text: "Rating the bite meter: " + C.points.bite + ". Logging a toilet trip: " + C.points.toilet + " (up to " + C.points.toiletCap + " a day)." }),
+    el("li", { text: "A day where everyone trained: +" + C.points.packDay + " each and a pack streak day." }),
+    el("li", { text: "Streaks need one session a day. Two missed days a week are frozen automatically." }),
+    el("li", { text: "Three sessions a day is the cap. A tired puppy learns nothing, so a fourth session earns nothing." })
+  ])));
 }
 
 /* ---------- video link ---------- */
-/* Videos play inside the app (YouTube privacy-enhanced embed) everywhere except
-   inside a Claude artifact, where other sites can't be embedded, so they open in YouTube. */
-const canEmbed = () => !!store && store.mode !== "claude";
+const canEmbed = () => true;
 const ytUrl = (id, shortV) => (shortV ? "https://www.youtube.com/shorts/" + id : "https://www.youtube.com/watch?v=" + id);
 function vidLink(id) {
   const v = C.videos[id]; if (!v) return null;
   const [title, by, min, kind] = v;
   const shortV = kind === "shorts";
   const meta = by + (shortV ? " · 1-min short" : min ? " · " + min + " min" : "");
-  const txt = el("span", { class: "txt" }, [el("b", { text: title }), el("small", { text: meta + (canEmbed() ? "" : " · YouTube") })]);
-  if (!canEmbed()) {
-    return el("a", { class: "vid" + (shortV ? " short" : ""), href: ytUrl(id, shortV), target: "_blank", rel: "noopener" }, [el("span", { class: "play", "aria-hidden": "true" }), txt]);
-  }
-  const thumb = el("span", { class: "thumb" + (shortV ? " short" : ""), "aria-hidden": "true" }, [
-    el("img", { src: "https://i.ytimg.com/vi/" + id + "/mqdefault.jpg", alt: "", loading: "lazy", onerror: (e) => e.target.remove() }),
-    el("span", { class: "play" })]);
+  const txt = el("span", { class: "txt" }, [el("b", { text: title }), el("small", { text: meta })]);
+  const thumb = el("span", { class: "thumb" + (shortV ? " short" : ""), "aria-hidden": "true" }, [el("img", { src: "https://i.ytimg.com/vi/" + id + "/mqdefault.jpg", alt: "", loading: "lazy" }), el("span", { class: "play" })]);
   return el("button", { class: "vid", type: "button", "aria-label": "Play: " + title, onclick: () => playVideo(id) }, [thumb, txt]);
 }
 function playVideo(id) {
-  const [title, by, , kind] = C.videos[id];
-  const shortV = kind === "shorts";
+  const v = C.videos[id]; if (!v) return;
+  const [title, by, , kind] = v; const shortV = kind === "shorts";
   const before = document.activeElement;
   const src = "https://www.youtube-nocookie.com/embed/" + id + "?autoplay=1&rel=0&playsinline=1";
   const frame = el("iframe", { src, title, allow: "autoplay; encrypted-media; picture-in-picture; fullscreen", allowfullscreen: true, referrerpolicy: "strict-origin-when-cross-origin" });
@@ -430,37 +703,77 @@ function lureSVG(kind) {
     '</svg><figcaption>' + caps[kind] + '</figcaption></figure>';
 }
 
-/* ---------- plan ---------- */
-function renderPlan() {
-  const P = $("#p-plan"); P.replaceChildren();
-  P.append(el("div", { class: "card" }, [el("div", { class: "eyebrow", text: "How it works" }), el("h2", { class: "h2", text: "5 minutes, 3 times a day, each" }),
-    el("ol", { class: "steps", style: "margin-top:8px" }, [
-      el("li", { html: "<b>1 minute warm-up</b> with something she already knows.".replace("she", T("she")) }),
-      el("li", { html: "<b>3 minutes</b> on this week's new skill: 5 to 10 quick reps, then a sniff break." }),
-      el("li", { html: "<b>1 minute</b> of play, and finish on an easy win." })]),
-    el("p", { class: "note", style: "margin-top:8px", text: T("Short sessions beat long ones at this age. If she starts biting, zooming or ignoring you, she's tired: stop, toilet break, nap.") })]));
-  P.append(el("div", { class: "callout" }, [el("b", { text: "Puppy preschool: book early" }), el("p", { text: T(C.preschool) })]));
-
-  P.append(el("div", { class: "eyebrow", text: "Who leads what" }));
-  P.append(el("div", { class: "card roles" }, family().map((p) => { const r = C.roles[p.role] || C.roles.helper;
-    return el("div", { class: "role", style: "--c:" + colorOf(p) }, [el("div", { class: "av", text: p.name[0].toUpperCase() }), el("div", {}, [el("b", { text: p.name + ": " + r.name }), el("p", { text: T(r.lead) })])]); })));
-
-  P.append(el("div", { class: "eyebrow", text: "The " + C.weeks.length + "-week plan" }));
+/* ---------- skills (the tree) ---------- */
+function skillCard(s) {
+  const st = S.scores ? S.scores.skills[s.id] : { open: true, mastered: false, votes: 0, need: 3, who: [], practising: false };
+  const m = me();
+  const body = el("div", { class: "acc-body" });
+  if (!st.open) body.append(el("p", { class: "note locked", text: "Unlocks as soon as someone has practised " + (s.req || []).map((r) => skillById(r) ? T(skillById(r).nm) : r).join(" and ") + " in a session. You can read ahead now." }));
+  if (s.lure) body.append(el("div", { html: lureSVG(s.lure) }));
+  body.append(el("ol", { class: "steps" }, s.steps.map((x) => el("li", { text: T(x) }))));
+  body.append(el("div", { class: "done" }, [el("b", { text: "Done when: " }), T(s.done)]));
+  body.append(el("p", { class: "note", text: "Raise one thing at a time: time, then distance, then distractions. New room or new person? Drop back a step and rebuild." }));
+  // mastery votes
+  const voters = st.who.map((id) => person(id)).filter(Boolean);
+  const votesRow = el("div", { class: "votes" }, [
+    el("span", { class: "vdots", "aria-label": st.votes + " of " + st.need + " confirmations" }, [...Array(st.need)].map((_, i) => el("i", { class: i < st.votes ? "on" : "" }))),
+    el("small", { text: st.mastered ? "Mastered by the whole pack" : voters.length ? "Confirmed by " + voters.map((p) => p.name).join(", ") + ". " + (st.need - st.votes) + " more to master." : "Nobody has confirmed the goal yet. " + st.need + " different people need to, each with a witness." })
+  ]);
+  body.append(votesRow);
+  if (m && st.open) {
+    const mine = st.who.includes(m.id);
+    if (mine) body.append(el("button", { class: "btn ghost", type: "button", text: "Take back my confirmation", onclick: () => safe(() => store.setMastery(s.id, m.id, null, false)) }));
+    else {
+      const others = family().filter((p) => p.id !== m.id);
+      const wit = el("select", { "aria-label": "Who saw it?" }, [el("option", { value: "", text: "Who saw it?" }), ...others.map((p) => el("option", { value: p.id, text: p.name }))]);
+      body.append(el("div", { class: "row" }, [wit, el("button", { class: "btn", type: "button", text: T("She") + " did it!", onclick: async () => {
+        if (!wit.value) { toast("Pick who watched"); return; }
+        await safe(async () => { await store.setMastery(s.id, m.id, wit.value, true); buzz([20, 30, 20]); toast("+" + C.points.mastery + " for you, +" + C.points.witness + " for " + person(wit.value).name); });
+      } })]));
+      body.append(el("small", { class: "note", text: "Confirm when " + T("she") + " hits the goal above with you, and someone else saw it. Big points, so it needs a witness." }));
+    }
+  }
+  if (s.help) body.append(el("button", { class: "chip", text: "Full biting plan →", onclick: () => show("help") }));
+  body.append(vids(s.v));
+  const pill = st.mastered ? el("span", { class: "pill good", text: "Mastered" }) : !st.open ? el("span", { class: "pill", text: "🔒 Locked" }) : st.votes ? el("span", { class: "pill warm", text: st.votes + "/" + st.need }) : st.practising ? el("span", { class: "pill warm", text: "Practising" }) : el("span", { class: "pill open", text: "Open" });
+  return el("details", { class: "acc skill" + (st.mastered ? " mastered" : !st.open ? " locked" : ""), id: "sk-" + s.id }, [el("summary", {}, [el("div", { class: "nm" }, [el("h3", { text: T(s.nm) }), el("small", { text: (s.req && s.req.length ? "Needs " + s.req.map((r) => skillById(r) ? T(skillById(r).nm) : r).join(", ") : "No prerequisites") })]), pill]), body]);
+}
+function renderSkills() {
+  const P = $("#p-skills"); P.replaceChildren();
+  const sc = S.scores;
+  P.append(el("div", { class: "card focus" }, [el("div", { class: "eyebrow", text: "Skills" }), el("h2", { class: "h2", text: "Pick anything that's open" }),
+    el("p", { class: "note", style: "margin-top:6px", text: "A skill opens as soon as someone has practised the one it builds on: one Sit session opens Down and Stay, one Come session opens Hide and seek. Mastering takes three people and a witness. Everyone does everything: the missions on Today make sure the week covers the lot." })]));
+  const groups = [["Open now", (st) => st.open && !st.mastered], ["Mastered", (st) => st.mastered], ["Locked for now", (st) => !st.open]];
+  groups.forEach(([title, fn]) => {
+    const items = C.skills.filter((s) => fn(sc ? sc.skills[s.id] : { open: true }));
+    if (!items.length) return;
+    P.append(el("div", { class: "eyebrow", text: title + " (" + items.length + ")" }));
+    items.forEach((s) => P.append(skillCard(s)));
+  });
+  // suggested path and the plan material
+  P.append(el("div", { class: "eyebrow", text: "A suggested path" }));
   const ci = weekIndex(today);
   const born = S.settings && parseIso(S.settings.puppy.born);
-  C.weeks.forEach((w, i) => {
-    const s = addDays(startDate(), i * 7), e = addDays(s, 6);
-    const age = born ? " · " + Math.floor((s - born) / 864e5 / 7) + " weeks old" : "";
-    P.append(el("article", { class: "card wk" + (i === ci ? " current" : "") }, [
-      i === ci ? el("div", { class: "eyebrow", style: "color:var(--blaze)", text: "This week" }) : null,
-      el("header", {}, [el("h3", { text: "Week " + (i + 1) + ": " + w.title }), el("span", { class: "dates", text: short(s) + " – " + short(e) + age })]),
-      el("ul", {}, w.goals.map((g) => el("li", { text: T(g) }))), el("p", { class: "note", text: T(w.note) })]));
-  });
-
+  P.append(el("details", { class: "acc" }, [el("summary", {}, el("div", { class: "nm" }, [el("h3", { text: "The 6-week plan" }), el("small", { text: "If you like a map. Nothing here is a gate." })])),
+    el("div", { class: "acc-body" }, C.weeks.map((w, i) => {
+      const s = addDays(startDate(), i * 7), e = addDays(s, 6);
+      const age = born ? " · " + Math.floor((s - born) / 864e5 / 7) + " weeks old" : "";
+      return el("article", { class: "card wk" + (i === ci ? " current" : "") }, [
+        el("header", {}, [el("h3", { text: "Week " + (i + 1) + ": " + w.title }), el("span", { class: "dates", text: short(s) + " – " + short(e) + age })]),
+        el("div", { class: "chips" }, w.skills.map((id) => { const sk = skillById(id); return sk ? el("button", { class: "chip", text: T(sk.nm), onclick: () => openAcc("sk-" + id, "skills") }) : null; })),
+        el("p", { class: "note", text: T(w.note) })]);
+    }))]));
+  P.append(el("div", { class: "eyebrow", text: "The plan: how a session goes" }));
+  P.append(el("div", { class: "card" }, [el("h2", { class: "h2", text: "5 minutes, 3 times a day, each" }),
+    el("ol", { class: "steps", style: "margin-top:8px" }, [
+      el("li", { html: "<b>1 minute warm-up</b> with something " + T("she") + " already knows." }),
+      el("li", { html: "<b>2 to 3 minutes</b> on the mission: 5 to 10 quick reps, lots of treats, then a sniff break." }),
+      el("li", { html: "<b>1 minute</b> of play, and finish on an easy win." })]),
+    el("p", { class: "note", style: "margin-top:8px", text: T("Short sessions beat long ones. If she starts biting, zooming or ignoring you, she's tired: stop, toilet break, nap.") })]));
+  P.append(el("div", { class: "callout" }, [el("b", { text: "Puppy preschool: book early" }), el("p", { text: T(C.preschool) })]));
   P.append(el("div", { class: "eyebrow", text: "Same words, everyone" }));
   P.append(el("div", { class: "card" }, [el("p", { class: "note", style: "margin-bottom:8px", text: T("She learns fastest when everyone says exactly the same thing. Say a cue once. If she doesn't do it, make it easier rather than repeating louder.") }),
     el("table", { class: "cue-tbl" }, C.cues.map(([a, b]) => el("tr", {}, [el("td", { text: a }), el("td", { text: b })])))]));
-
   P.append(el("div", { class: "eyebrow", text: "Treats" }));
   P.append(el("div", { class: "card focus" }, [el("h2", { class: "h2", text: "Pea-sized, soft and smelly" }), el("p", { class: "note", style: "margin-top:6px", text: T(C.treats.intro) })]));
   P.append(el("div", { class: "ladder" }, C.treats.ladder.map((x) => el("div", { class: "rung " + x.c }, [el("div", { class: "lvl", text: x.l }), el("div", {}, [el("b", { text: x.t }), el("p", { text: T(x.d) })])]))));
@@ -469,38 +782,11 @@ function renderPlan() {
   P.append(el("div", { class: "rota" }, C.treats.rota.map(([d, t], i) => el("div", { class: i === td ? "today" : "" }, [el("b", { text: d }), t]))));
   P.append(el("div", { class: "card" }, [el("div", { class: "eyebrow", text: "The morning treat pot" }), el("p", { style: "margin:6px 0 0", text: T(C.treats.pot) })]));
   P.append(el("div", { class: "callout danger" }, [el("b", { text: "Never give these" }), el("p", { text: C.treats.never })]));
-
   P.append(el("div", { class: "eyebrow", text: "House rules" }));
   P.append(el("div", { class: "card" }, el("ul", { class: "plain" }, C.rules.map((x) => el("li", { text: T(x) })))));
   P.append(el("div", { class: "eyebrow", text: "Safe socialising before vaccinations finish" }));
   P.append(el("div", { class: "card" }, [el("p", { class: "note", style: "margin-bottom:8px", text: T("Ages 8 to 16 weeks are when she decides what's normal. Keep her paws off public ground until the vet says so, but carry her into the world. One new thing a day.") }),
     el("ul", { class: "plain" }, C.social.map((x) => el("li", { text: x })))]));
-}
-
-/* ---------- skills ---------- */
-function leadsFor(role) {
-  if (role === "all") return "Everyone";
-  const who = family().filter((p) => p.role === role).map((p) => p.name);
-  return who.length ? who.join(" & ") : "Anyone";
-}
-function renderSkills() {
-  const P = $("#p-skills"); P.replaceChildren();
-  P.append(el("div", { class: "card focus" }, [el("div", { class: "eyebrow", text: "Skills" }), el("h2", { class: "h2", text: "How to teach each one" }),
-    el("p", { class: "note", style: "margin-top:6px", text: "Tap a skill for the steps, a goal and short videos. The animations show where to move the treat." })]));
-  C.weeks.forEach((w, wi) => {
-    const items = C.skills.filter((s) => s.wk === wi + 1);
-    if (!items.length) return;
-    P.append(el("div", { class: "eyebrow", text: "Week " + (wi + 1) + " · " + w.title }));
-    items.forEach((s) => {
-      const body = el("div", { class: "acc-body" });
-      if (s.lure) body.append(el("div", { html: lureSVG(s.lure) }));
-      body.append(el("ol", { class: "steps" }, s.steps.map((x) => el("li", { text: T(x) }))));
-      body.append(el("div", { class: "done" }, [el("b", { text: "Done when: " }), T(s.done)]));
-      if (s.help) body.append(el("button", { class: "chip", text: "Full biting plan →", onclick: () => show("help") }));
-      body.append(vids(s.v));
-      P.append(el("details", { class: "acc", id: "sk-" + s.id }, [el("summary", {}, [el("div", { class: "nm" }, [el("h3", { text: T(s.nm) }), el("small", { text: "Lead: " + leadsFor(s.role) })])]), body]));
-    });
-  });
 }
 
 /* ---------- help ---------- */
@@ -528,12 +814,11 @@ const STYLE = { reward: "Reward-based", mixed: "Mixed methods", aversive: "Uses 
 function renderWatch() {
   const P = $("#p-watch"); P.replaceChildren();
   P.append(el("div", { class: "card focus" }, [el("div", { class: "eyebrow", text: "Watch and read" }), el("h2", { class: "h2", text: "Bite-sized videos first" }),
-    el("p", { class: "note", style: "margin-top:6px", text: (canEmbed() ? "Tap a video to play it right here." : "Videos open in YouTube.") + " Every video was checked when it was added. Some creators' videos show YouTube ads." })]));
+    el("p", { class: "note", style: "margin-top:6px", text: "Tap a video to play it right here. Every video was checked when it was added. Some creators' videos show YouTube ads." })]));
   const shorts = Object.keys(C.videos).filter((id) => C.videos[id][3] === "shorts");
   P.append(el("div", { class: "eyebrow", text: "1-minute shorts (" + shorts.length + ")" }));
   P.append(el("details", { class: "acc" }, [el("summary", {}, el("div", { class: "nm" }, [el("h3", { text: "Quick wins" }), el("small", { text: "Biting, crates, zoomies, leave it, drop it…" })])), el("div", { class: "acc-body" }, vids(shorts))]));
   C.watch.forEach((g) => { P.append(el("div", { class: "eyebrow", text: g.h })); P.append(vids(g.v)); });
-
   P.append(el("div", { class: "eyebrow", text: "Famous trainers on YouTube" }));
   P.append(el("div", { class: "card", style: "display:grid;gap:8px" }, [
     el("div", { class: "legend" }, [el("span", { class: "style reward", text: STYLE.reward }), el("span", { class: "style mixed", text: STYLE.mixed }), el("span", { class: "style aversive", text: STYLE.aversive })]),
@@ -549,19 +834,24 @@ function renderWatch() {
 }
 
 /* ---------- render ---------- */
+function renderAll() { renderToday(); renderSkills(); renderPack(); }
 function onState() {
+  const t = new Date(); t.setHours(0, 0, 0, 0); if (iso(t) !== iso(today)) { today = t; viewDay = new Date(today); }
+  recompute();
   setSync();
   renderHeader();
   if (!S.settings) { if ($("#p-settings").hidden || !$("#set-name")) { renderSettings(true); show("settings"); } return; }
+  if (meId && !me()) { meId = null; }
   const key = JSON.stringify(S.settings);
-  if (key !== staticKey) { staticKey = key; renderPlan(); renderSkills(); renderHelp(); renderWatch(); }
-  renderToday();
+  if (key !== staticKey) { staticKey = key; renderHelp(); renderWatch(); }
+  renderAll();
   if (!$("#p-loading").hidden || !$("#p-pin").hidden) {
     let start = "today";
     const h = (location.hash || "").slice(1);
-    if (TABS.includes(h)) start = h; else { try { const t = sessionStorage.getItem("pt.tab"); if (TABS.includes(t)) start = t; } catch (e) {} }
-    show(start);
+    if (TABS.includes(h)) start = h; else { try { const t2 = sessionStorage.getItem("pt.tab"); if (TABS.includes(t2)) start = t2; } catch (e) {} }
+    if (!me()) renderWho(); else show(start);
   }
+  checkCelebrations();
 }
 async function boot2() {
   try {
@@ -572,10 +862,13 @@ async function boot2() {
   }
 }
 (async function boot() {
-  store = await pickStore(); setSync(); boot2();
-  // Installable app + offline shell when served from a real web server (not inside a Claude artifact).
-  if (store.mode !== "claude" && "serviceWorker" in navigator && /^https?:/.test(location.protocol)) {
-    try { navigator.serviceWorker.register("sw.js").catch(() => {}); } catch (e) {}
-  }
+  applyTheme();
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applyTheme);
+  store = await pickStore();
+  setSync();
+  if ("serviceWorker" in navigator && /^https?:/.test(location.protocol)) { try { navigator.serviceWorker.register("sw.js"); } catch (e) {} }
+  // keep "due now" fresh without a server round-trip
+  setInterval(() => { if (S.settings && current === "today" && !$("#p-today").hidden && iso(viewDay) === iso(today)) { recompute(); renderToday(); } }, 60000);
+  boot2();
 })();
 })();
