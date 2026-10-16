@@ -6,6 +6,14 @@ Everyone does **5 minutes, 3 times a day**. The app deals each person a mission,
 
 Made in New Zealand for a German Shorthaired Pointer x heading dog puppy who bites a lot, and for the three kids who are training her. Works for any puppy and any family.
 
+## Who built it, and why it's free
+
+[Tim Thomas](https://www.netpotential.co.nz) is a developer with 25 years' experience who now works with a swarm of AI agents. When he can't find a free app that does everything he wants, he builds it. He got a puppy, looked at the apps, and built this one instead.
+
+The first version, the research behind it (three agents read the app market, the puppy-behaviour literature and the gamification evidence) and the family rewards build you are reading about all happened in one afternoon and evening. The git log is the receipt: first commit 15:35, family rewards build 18:40, same day. If that is a couple of hours, think about what a couple of days, a couple of weeks and a couple of months will do. The aim is simple: the best puppy app there is, and free.
+
+Why free? Because he can. There is spare AI capacity every week and it is better burned on something useful than left on the table. If you run a pet rescue and want an app built for you, ask: [netpotential.co.nz/token-burner](https://www.netpotential.co.nz/token-burner).
+
 ## Why this exists
 
 We looked hard at the puppy apps on the market (Zigzag, Dogo, Puppr, Woofz, Hundeo, Pupford and a dozen trackers). They have all converged on the same product: a quiz, an age-based plan, three daily tasks, videos, a problem library, a clicker, and a thin free tier behind a trial. What none of them has is the family layer:
@@ -151,6 +159,6 @@ This app is general guidance, not a substitute for your vet or a qualified train
 
 [AGPL-3.0](LICENSE). Free for any puppy parent, trainer or rescue to use, change and share. If you change it and offer it to other people as a service, you share your changes under the same licence, so improvements flow back to every family.
 
-Want a branded version for your puppy preschool, daycare, vet clinic or training business without publishing your changes? A commercial licence and hosted, branded versions are available: open an issue or email hello@growthspurt.agency.
+Want a branded version for your puppy preschool, daycare, vet clinic or training business without publishing your changes? A commercial licence and hosted, branded versions are available: email [tim@netpotential.co.nz](mailto:tim@netpotential.co.nz).
 
 The name Puppy School HQ and its logo are not covered by the licence.
