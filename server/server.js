@@ -22,6 +22,8 @@ const path = require("node:path");
 const crypto = require("node:crypto");
 const CONTENT = require("../public/content.js");
 const REWARDS = require("../public/rewards.js");
+const PUSH = require("./push.js");
+const NOTIFY = require("./notify.js");
 
 const VERSION = "2.0.0";
 const PUBLIC_DIR = path.resolve(__dirname, "..", "public");
@@ -32,7 +34,7 @@ const MIME = {
 };
 const CSP = [
   "default-src 'self'", "script-src 'self'", "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-  "font-src https://fonts.gstatic.com", "img-src 'self' data: https://i.ytimg.com",
+  "font-src https://fonts.gstatic.com", "img-src 'self' data: blob: https://i.ytimg.com",
   "frame-src https://www.youtube-nocookie.com https://www.youtube.com", "connect-src 'self'", "frame-ancestors 'none'",
   "base-uri 'none'", "form-action 'none'"
 ].join("; ");
@@ -55,6 +57,7 @@ function createApp(opts = {}) {
   const limits = Object.assign({ perIp: 5, perIpWindowMs: 15 * 60e3, global: 20, globalWindowMs: 60 * 60e3 }, opts.limits || {});
   const now = opts.now || (() => Date.now());
   const log = opts.log || ((...a) => console.log(new Date().toISOString(), ...a));
+  const pushSubject = opts.pushSubject || process.env.PUSH_SUBJECT || "mailto:hello@growthspurt.agency";
 
   fs.mkdirSync(dataDir, { recursive: true });
 
@@ -95,16 +98,24 @@ function createApp(opts = {}) {
 
   /* ---------- store ---------- */
   const storeFile = path.join(dataDir, "store.json");
-  let db = { rev: 1, settings: null, ticks: {}, logs: {}, mastery: {}, toilet: [] };
+  let db = { rev: 1, settings: null, ticks: {}, logs: {}, mastery: {}, toilet: [], push: [], sent: null };
   if (fs.existsSync(storeFile)) { try { db = Object.assign(db, JSON.parse(fs.readFileSync(storeFile, "utf8"))); } catch (e) { log("store.json unreadable, starting fresh:", e.message); } }
-  function persist() {
-    db.rev++;
+  function persist(bump = true) {
+    if (bump) db.rev++;
     const tmp = storeFile + "." + process.pid + ".tmp";
     fs.writeFileSync(tmp, JSON.stringify(db));
     fs.renameSync(tmp, storeFile);
   }
   const photoFile = path.join(dataDir, "photo.jpg");
-  const stateOut = () => ({ rev: db.rev, settings: db.settings, ticks: db.ticks, logs: db.logs, mastery: db.mastery, toilet: db.toilet.slice(-300), photo: fs.existsSync(photoFile), today: localToday() });
+  const stateOut = () => ({ rev: db.rev, settings: db.settings, ticks: db.ticks, logs: db.logs, mastery: db.mastery, toilet: db.toilet.slice(-300), photo: fs.existsSync(photoFile), today: localToday(),
+    push: (db.push || []).map((s) => ({ id: s.id, pid: s.pid, prefs: s.prefs || {}, created: s.created, label: s.label || "" })), sms: !!smsSender, vapid: vapid.publicKey });
+  /* ---------- push keys, notifier ---------- */
+  const vapidFile = path.join(dataDir, "vapid.json");
+  let vapid;
+  if (fs.existsSync(vapidFile)) vapid = JSON.parse(fs.readFileSync(vapidFile, "utf8"));
+  else { vapid = PUSH.generateVapidKeys(); fs.writeFileSync(vapidFile, JSON.stringify(vapid), { mode: 0o600 }); }
+  const smsSender = opts.sms === null ? null : (opts.sms || NOTIFY.makeSmsSender(process.env));
+  const notifier = opts.noScheduler ? null : NOTIFY.createNotifier({ db, C: CONTENT, R: REWARDS, keys: vapid, subject: pushSubject, log, persist, sendPush: PUSH.sendPush, sendSms: smsSender || (async () => { throw new Error("no SMS gateway configured"); }), now: opts.now ? () => new Date(now()) : undefined });
   const member = (id) => (db.settings && db.settings.family.find((m) => m.id === id)) || null;
 
   function cleanSettings(x) {
@@ -116,7 +127,8 @@ function createApp(opts = {}) {
       const kind = KINDS.has(m && m.kind) ? m.kind : "kid";
       const t = Number(m && m.target);
       return { id: str(m && m.id, 24), name: str(m && m.name, 20), kind, age: AGES.has(m && m.age) ? m.age : "",
-        target: Number.isInteger(t) && t >= 1 && t <= 30 ? t : CONTENT.kinds[kind].target };
+        target: Number.isInteger(t) && t >= 1 && t <= 30 ? t : CONTENT.kinds[kind].target,
+        phone: NOTIFY.normalisePhone(m && m.phone), sms: !!(m && m.sms) };
     }).filter((m) => /^[A-Za-z0-9]{1,24}$/.test(m.id) && m.name);
     if (!family.length) return null;
     return {
@@ -203,6 +215,7 @@ function createApp(opts = {}) {
       if (by && by.kind === "kid" && date < localToday()) return send(res, 403, { error: "Ask a grown-up to log a past day" });
       if (body.on) db.ticks[key] = { at: now(), by: by ? by.id : undefined, skill: SKILL_IDS.has(body.skill) ? body.skill : undefined };
       else delete db.ticks[key];
+      if (by) (db.push || []).forEach((s) => { if (s.pid === by.id) s.unanswered = 0; });
       persist(); return send(res, 200, stateOut());
     }
     if ((m = p.match(/^\/api\/mastery\/([a-z]+)$/)) && req.method === "PUT") {
@@ -232,6 +245,53 @@ function createApp(opts = {}) {
       const t = db.toilet.find((x) => x.id === m[1]);
       if (!t) return send(res, 404, { error: "Not found" });
       t.void = true; persist(); return send(res, 200, stateOut());
+    }
+    if (p === "/api/push/subscribe" && req.method === "POST") {
+      const body = await readJson(req);
+      const sub = body.subscription;
+      const who = member(body.pid);
+      if (!who || !sub || typeof sub.endpoint !== "string" || !/^https:\/\//.test(sub.endpoint) || !sub.keys || !sub.keys.p256dh || !sub.keys.auth) return send(res, 400, { error: "Bad subscription" });
+      db.push = (db.push || []).filter((s) => s.endpoint !== sub.endpoint);
+      const id = crypto.createHash("sha256").update(sub.endpoint).digest("hex").slice(0, 12);
+      const prefs = Object.assign({}, NOTIFY.DEFAULTS, body.prefs && typeof body.prefs === "object" ? body.prefs : {});
+      db.push.push({ id, pid: who.id, endpoint: sub.endpoint, keys: { p256dh: String(sub.keys.p256dh), auth: String(sub.keys.auth) }, prefs, created: now(), label: String(body.label || "").slice(0, 40), unanswered: 0 });
+      if (db.push.length > 40) db.push = db.push.slice(-40);
+      persist(); return send(res, 200, Object.assign(stateOut(), { subId: id }));
+    }
+    if ((m = p.match(/^\/api\/push\/([a-f0-9]{12})$/)) && req.method === "PUT") {
+      const sub = (db.push || []).find((s) => s.id === m[1]);
+      if (!sub) return send(res, 404, { error: "Not found" });
+      const body = await readJson(req);
+      const by = member(body.by);
+      const mine = by && by.id === sub.pid;
+      if (!mine && !(by && by.kind === "adult")) return send(res, 403, { error: "Only that person or a grown-up can change this" });
+      const allowed = ["on", "am", "pm", "ev", "risk", "amAt", "amWeekendAt", "pmAt", "evAt", "riskAt"];
+      const prefs = Object.assign({}, sub.prefs || {});
+      allowed.forEach((k) => { if (body.prefs && k in body.prefs) { const v = body.prefs[k]; if (/At$/.test(k)) { if (/^\d{2}:\d{2}$/.test(v)) prefs[k] = v; } else prefs[k] = !!v; } });
+      sub.prefs = prefs; if (prefs.on) sub.unanswered = 0;
+      persist(); return send(res, 200, stateOut());
+    }
+    if ((m = p.match(/^\/api\/push\/([a-f0-9]{12})$/)) && req.method === "DELETE") {
+      db.push = (db.push || []).filter((s) => s.id !== m[1]); persist(); return send(res, 200, stateOut());
+    }
+    if ((m = p.match(/^\/api\/push\/([a-f0-9]{12})\/test$/)) && req.method === "POST") {
+      const sub = (db.push || []).find((s) => s.id === m[1]);
+      if (!sub) return send(res, 404, { error: "Not found" });
+      const pup = (db.settings && db.settings.puppy.name) || "Your puppy";
+      try { const r = await (opts.sendPush || PUSH.sendPush)(sub, { title: pup + " says", body: "Reminders are on for this phone. " + pup + " will nudge you when a session is empty, never during school or at night.", tag: "test", url: "/#today" }, vapid, pushSubject);
+        if (r.gone) { db.push = db.push.filter((s) => s.id !== sub.id); persist(); return send(res, 410, { error: "That subscription has expired. Turn reminders on again." }); }
+        return send(res, 200, { ok: true, status: r.status });
+      } catch (e) { return send(res, 502, { error: "Push failed: " + e.message }); }
+    }
+    if (p === "/api/sms/test" && req.method === "POST") {
+      const body = await readJson(req);
+      const by = member(body.by), to = member(body.pid);
+      if (!by || by.kind !== "adult") return send(res, 403, { error: "Grown-ups only" });
+      if (!to || !to.phone) return send(res, 400, { error: "No phone number saved for that person" });
+      if (!smsSender) return send(res, 503, { error: "No SMS gateway configured on this server" });
+      const pup = (db.settings && db.settings.puppy.name) || "Your puppy";
+      try { await smsSender(to.phone, pup + " here. Texts are on for " + to.name + ". I'll text once a day at most, only if nothing is on the chart. puppy.appspurt.com"); return send(res, 200, { ok: true }); }
+      catch (e) { return send(res, 502, { error: "SMS failed: " + e.message }); }
     }
     if (p === "/api/photo") {
       if (req.method === "GET") {
@@ -268,6 +328,8 @@ function createApp(opts = {}) {
       if (!res.headersSent) send(res, code, { error: code === 500 ? "Server error" : e.message });
     });
   });
+  server.notifier = notifier;
+  server.on("close", () => { if (notifier) notifier.stop(); });
   return server;
 }
 

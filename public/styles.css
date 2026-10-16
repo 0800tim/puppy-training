@@ -167,6 +167,17 @@ table.week .today{background:var(--sun-soft)}
 .daybar{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .daybar h2{font-size:1.1rem}
 
+/* reminders, challenges */
+.tgl{display:flex;align-items:center;gap:10px;font-size:.93rem}
+.tgl input[type=checkbox]{width:20px;height:20px;accent-color:var(--accent)}
+.tgl span{flex:1}
+.tgl input[type=time]{width:auto;padding:4px 8px;font-size:.9rem}
+input[type=tel]{font:inherit;padding:10px 12px;border-radius:12px;border:1px solid var(--line);background:var(--surface);color:var(--ink);min-width:0}
+.card.challenge{border:2px solid var(--sun)}
+.card.challenge.won{background:linear-gradient(135deg,var(--sun-soft),var(--good-soft))}
+.card.challenge h3{font-size:1.05rem}
+.chal{margin-top:10px;border:0;border-radius:99px;padding:6px 12px;background:rgba(255,255,255,.18);color:#fff;font-weight:700;font-size:.85rem;cursor:pointer;text-align:left}
+
 /* pack */
 .prow.pack{grid-template-columns:minmax(0,1fr) auto}
 .prow.pack .stats{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
@@ -330,3 +341,8 @@ button.vid{width:100%;border:1px solid var(--line);font:inherit;text-align:left;
 .player-close{position:fixed;top:calc(10px + env(safe-area-inset-top,0px));right:max(12px,env(safe-area-inset-right,0px));width:44px;height:44px;border-radius:50%;border:0;background:rgba(255,255,255,.16);color:#fff;font-size:1.2rem;cursor:pointer}
 
 @media (max-width:400px){ .meter button{font-size:.66rem} .meter button .e{font-size:1.25rem} table.week{font-size:.78rem} .dots i{width:6px;height:6px} .slot .t{font-size:.82rem} }
+
+/* photo cropper */
+.cropper{position:fixed;inset:0;z-index:25;background:rgba(10,6,24,.94);display:grid;place-content:center;gap:14px;padding:16px;color:#fff;text-align:center}
+.cropper p{margin:0;color:#cfc8ff;font-size:.9rem}
+.cropper canvas{touch-action:none;border-radius:12px;background:#000;display:block;margin:0 auto;cursor:grab}

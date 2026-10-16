@@ -55,7 +55,7 @@ function T(str) {
 }
 
 /* ---------- state ---------- */
-const S = { settings: null, ticks: {}, logs: {}, mastery: {}, toilet: [], photo: false, scores: null };
+const S = { settings: null, ticks: {}, logs: {}, mastery: {}, toilet: [], photo: false, scores: null, push: [], sms: false, vapid: "" };
 let store = null;
 let viewDay = new Date(today);
 let staticKey = "";
@@ -125,6 +125,7 @@ class ServerStore {
     this.rev = j.rev;
     S.settings = j.settings || null;
     S.ticks = j.ticks || {}; S.logs = j.logs || {}; S.mastery = j.mastery || {}; S.toilet = j.toilet || [];
+    S.push = j.push || []; S.sms = !!j.sms; S.vapid = j.vapid || "";
     if (j.photo !== S.photo) { S.photo = !!j.photo; this.photoBust = Date.now(); }
     this.cb();
   }
@@ -168,6 +169,11 @@ class ServerStore {
   setPhoto(data) { return data ? this.write("PUT", "api/photo", { data }) : this.write("DELETE", "api/photo"); }
   photoUrl() { return S.photo ? "api/photo?v=" + (this.photoBust || 0) : null; }
   exportJson() { return { settings: S.settings, ticks: S.ticks, logs: S.logs, mastery: S.mastery, toilet: S.toilet }; }
+  async subscribePush(subscription, pid, prefs, label) { const r = await api("POST", "api/push/subscribe", { subscription, pid, prefs, label }); if (!r.ok) throw new Error((r.json && r.json.error) || "save failed"); this.apply(r.json); return r.json.subId; }
+  setPushPrefs(id, prefs, by) { return this.write("PUT", "api/push/" + id, { prefs, by }); }
+  deletePush(id) { return this.write("DELETE", "api/push/" + id); }
+  async testPush(id) { const r = await api("POST", "api/push/" + id + "/test"); if (!r.ok) throw new Error((r.json && r.json.error) || "test failed"); }
+  async testSms(pid, by) { const r = await api("POST", "api/sms/test", { pid, by }); if (!r.ok) throw new Error((r.json && r.json.error) || "test failed"); }
 }
 async function pickStore() {
   if (/^https?:/.test(location.protocol)) {
@@ -296,20 +302,60 @@ function renderWho(push) {
 }
 
 /* ---------- settings / setup ---------- */
-function resizeImage(file) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => {
-      const size = 320, c = document.createElement("canvas"); c.width = size; c.height = size;
-      const ctx = c.getContext("2d");
-      const s = Math.min(img.width, img.height), sx = (img.width - s) / 2, sy = (img.height - s) / 2;
-      ctx.drawImage(img, sx, sy, s, s, 0, 0, size, size);
-      let q = 0.86, out = c.toDataURL("image/jpeg", q);
-      while (out.length > 300 * 1024 && q > 0.4) { q -= 0.1; out = c.toDataURL("image/jpeg", q); }
-      URL.revokeObjectURL(img.src); resolve(out);
+/* ---------- photo cropper: drag, pinch to zoom, two-finger rotate, circular crop ---------- */
+async function loadBitmap(file) {
+  try { return await createImageBitmap(file, { imageOrientation: "from-image" }); } catch (e) {}
+  return new Promise((resolve, reject) => { const img = new Image(); img.onload = () => resolve(img); img.onerror = () => reject(new Error("Couldn't read that photo")); img.src = URL.createObjectURL(file); });
+}
+function cropPhoto(file) {
+  return new Promise(async (resolve) => {
+    let img; try { img = await loadBitmap(file); } catch (e) { toast(e.message); return resolve(null); }
+    const iw = img.width, ih = img.height;
+    const vp = Math.min(window.innerWidth - 32, 360), dpr = Math.min(2, window.devicePixelRatio || 1);
+    const cv = el("canvas", { width: vp * dpr, height: vp * dpr, style: "width:" + vp + "px;height:" + vp + "px" });
+    const ctx = cv.getContext("2d");
+    const st = { s: vp / Math.min(iw, ih), a: 0, x: 0, y: 0 };
+    const minS = vp / Math.max(iw, ih) * 0.5;
+    const draw = () => {
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, vp, vp);
+      ctx.save(); ctx.translate(vp / 2 + st.x, vp / 2 + st.y); ctx.rotate(st.a); ctx.scale(st.s, st.s); ctx.drawImage(img, -iw / 2, -ih / 2); ctx.restore();
+      ctx.fillStyle = "rgba(10,6,24,.62)"; ctx.beginPath(); ctx.rect(0, 0, vp, vp); ctx.arc(vp / 2, vp / 2, vp / 2 - 2, 0, Math.PI * 2, true); ctx.fill("evenodd");
+      ctx.strokeStyle = "#ffc83d"; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(vp / 2, vp / 2, vp / 2 - 2, 0, Math.PI * 2); ctx.stroke();
     };
-    img.onerror = () => reject(new Error("Couldn't read that photo"));
-    img.src = URL.createObjectURL(file);
+    const ptrs = new Map(); let last = null;
+    const geo = () => { const p = [...ptrs.values()]; if (p.length < 2) return { x: p[0].x, y: p[0].y }; const dx = p[1].x - p[0].x, dy = p[1].y - p[0].y; return { x: (p[0].x + p[1].x) / 2, y: (p[0].y + p[1].y) / 2, d: Math.hypot(dx, dy), a: Math.atan2(dy, dx) }; };
+    cv.addEventListener("pointerdown", (e) => { cv.setPointerCapture(e.pointerId); ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY }); last = geo(); });
+    cv.addEventListener("pointermove", (e) => {
+      if (!ptrs.has(e.pointerId)) return;
+      ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      const g = geo(); if (!last) { last = g; return; }
+      st.x += g.x - last.x; st.y += g.y - last.y;
+      if (g.d && last.d) { st.s = Math.max(minS, Math.min(st.s * (g.d / last.d), 20)); st.a += g.a - last.a; }
+      last = g; draw();
+    });
+    const up = (e) => { ptrs.delete(e.pointerId); last = ptrs.size ? geo() : null; };
+    cv.addEventListener("pointerup", up); cv.addEventListener("pointercancel", up);
+    cv.addEventListener("wheel", (e) => { e.preventDefault(); st.s = Math.max(minS, Math.min(st.s * (e.deltaY < 0 ? 1.08 : 0.92), 20)); draw(); }, { passive: false });
+    const finish = (ok) => {
+      ov.remove(); document.body.style.overflow = "";
+      if (!ok) return resolve(null);
+      const out = 320, oc = document.createElement("canvas"); oc.width = out; oc.height = out;
+      const k = out / vp, c = oc.getContext("2d");
+      c.fillStyle = "#fff"; c.fillRect(0, 0, out, out);
+      c.translate(out / 2 + st.x * k, out / 2 + st.y * k); c.rotate(st.a); c.scale(st.s * k, st.s * k); c.drawImage(img, -iw / 2, -ih / 2);
+      let q = 0.86, data = oc.toDataURL("image/jpeg", q);
+      while (data.length > 300 * 1024 && q > 0.4) { q -= 0.1; data = oc.toDataURL("image/jpeg", q); }
+      resolve(data);
+    };
+    const ov = el("div", { class: "cropper", role: "dialog", "aria-modal": "true", "aria-label": "Crop photo" }, [
+      el("p", { text: "Drag to move. Pinch to zoom. Two fingers to rotate." }),
+      cv,
+      el("div", { class: "row", style: "justify-content:center" }, [
+        el("button", { class: "btn ghost", type: "button", text: "↺ Rotate", onclick: () => { st.a -= Math.PI / 2; draw(); } }),
+        el("button", { class: "btn ghost", type: "button", text: "Cancel", onclick: () => finish(false) }),
+        el("button", { class: "btn", type: "button", text: "Use photo", onclick: () => finish(true) })])
+    ]);
+    document.body.style.overflow = "hidden"; document.body.append(ov); draw();
   });
 }
 function renderSettings(firstRun) {
@@ -328,6 +374,9 @@ function renderSettings(firstRun) {
         el("input", { type: "text", id: "fam-" + p.id, maxlength: "20", placeholder: "Name", value: p.name, "aria-label": "Name", oninput: (e) => (p.name = e.target.value) }),
         el("div", { class: "row" }, [kindSel(p), p.kind === "kid" ? ageSel(p) : null,
           el("label", { class: "target" }, ["Goal ", el("input", { type: "number", min: "1", max: "30", value: p.target || C.kinds[p.kind].target, "aria-label": "Sessions a week", oninput: (e) => { p.target = Number(e.target.value); p.touched = true; } }), " a week"])]),
+        isAdult(me()) && store.mode === "server" ? el("div", { class: "row" }, [
+          el("input", { type: "tel", placeholder: "Mobile (for texts)", value: p.phone || "", "aria-label": "Mobile number", style: "flex:1;min-width:150px", oninput: (e) => (p.phone = e.target.value) }),
+          el("label", { class: "target" }, [el("input", { type: "checkbox", checked: !!p.sms, onchange: (e) => (p.sms = e.target.checked) }), " text " + (p.name || "them")])]) : null
       ]),
       fam.length > 1 ? el("button", { class: "iconbtn", type: "button", "aria-label": "Remove " + (p.name || "person"), text: "✕", onclick: () => { fam.splice(i, 1); drawFam(); } }) : null
     ])));
@@ -349,7 +398,7 @@ function renderSettings(firstRun) {
     input.addEventListener("input", draw); draw(); return out;
   };
   const save = el("button", { class: "btn", type: "button", text: firstRun ? "Start training" : "Save", onclick: async () => {
-    const famClean = fam.map((p) => ({ id: p.id, name: p.name.trim().slice(0, 20), kind: p.kind, age: p.age || "", target: Math.max(1, Math.min(30, Number(p.target) || C.kinds[p.kind].target)) })).filter((p) => p.name);
+    const famClean = fam.map((p) => ({ id: p.id, name: p.name.trim().slice(0, 20), kind: p.kind, age: p.age || "", target: Math.max(1, Math.min(30, Number(p.target) || C.kinds[p.kind].target)), phone: p.phone || "", sms: !!p.sms })).filter((p) => p.name);
     if (!famClean.length) { toast("Add at least one person"); return; }
     const next = { puppy: { name: name.value.trim().slice(0, 24), sex: sex.value, breed: breed.value.trim().slice(0, 80), born: born.value }, start: start.value || iso(today), family: famClean };
     await safe(async () => { await store.saveSettings(next); toast("Saved"); if (!me()) renderWho(); else show(firstRun ? "today" : current); });
@@ -371,12 +420,14 @@ function renderSettings(firstRun) {
     if (S.photo) prev.append(el("img", { src: store.photoUrl(), alt: "" })); else prev.textContent = "🐶";
     const file = el("input", { type: "file", accept: "image/*", id: "set-photo", hidden: true, onchange: async (e) => {
       const fl = e.target.files && e.target.files[0]; if (!fl) return;
-      await safe(async () => { const data = await resizeImage(fl); await store.setPhoto(data); renderHeader(); renderSettings(false); }, "Photo saved");
+      e.target.value = "";
+      const data = await cropPhoto(fl); if (!data) return;
+      await safe(async () => { await store.setPhoto(data); renderHeader(); renderSettings(false); }, "Photo saved");
     } });
     photoCard.append(el("div", { class: "row" }, [prev, el("div", { style: "display:grid;gap:6px" }, [
       el("button", { class: "btn ghost", type: "button", text: S.photo ? "Change photo" : "Add a photo", onclick: () => file.click() }),
       S.photo ? el("button", { class: "btn ghost", type: "button", text: "Remove", onclick: () => safe(async () => { await store.setPhoto(null); renderHeader(); renderSettings(false); }) }) : null,
-      el("small", { class: "note", text: "Shows in the top corner on every phone. Square crop, kept small." })]), file]));
+      el("small", { class: "note", text: "Shows in the top corner on every phone. You crop it to a circle; it is kept small." })]), file]));
     P.append(photoCard);
   }
   P.append(
@@ -402,7 +453,66 @@ function renderSettings(firstRun) {
         store.mode === "server" ? el("button", { class: "btn ghost", type: "button", text: "Lock this phone", onclick: () => store.logout() }) : null]),
       el("p", { class: "note", text: store.mode === "server" ? "Ticks sync to everyone who has the family PIN. Changing the PIN on the server signs every phone out." : "Ticks are saved on this phone only. To share one chart with the whole family, self-host it with a family PIN (see the project README)." })]);
     P.append(el("div", { class: "eyebrow", text: "This phone" }), info);
+    P.append(el("div", { class: "eyebrow", text: "Reminders" }), renderNotifCard());
   }
+}
+
+/* ---------- reminders (web push per phone, SMS per person) ---------- */
+const urlB64ToU8 = (s) => { const b = atob((s + "=".repeat((4 - (s.length % 4)) % 4)).replace(/-/g, "+").replace(/_/g, "/")); return Uint8Array.from(b, (c) => c.charCodeAt(0)); };
+function renderNotifCard() {
+  const card = el("div", { class: "card", style: "display:grid;gap:10px" });
+  const m = me();
+  if (store.mode !== "server") { card.append(el("p", { class: "note", text: "Reminders need the family server (the PIN version)." })); return card; }
+  if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) {
+    card.append(el("p", { class: "note", text: "This browser can't do app notifications. On iPhone, add the app to your Home Screen first, then come back here." })); return card;
+  }
+  const myId = lsGet("pt.pushId", null);
+  const mine = S.push.find((x) => x.id === myId);
+  const draw = () => {
+    card.replaceChildren();
+    if (!mine) {
+      card.append(el("p", { text: (m ? m.name + ", " : "") + pupName() + " can nudge this phone when a session is empty: a morning one before school, one after school, one in the evening, and a streak-saver at 8pm. Never more than two a day, never during school hours or at night." }),
+        el("button", { class: "btn", type: "button", text: "Turn on reminders on this phone", onclick: async () => {
+          if (!m) { renderWho(); return; }
+          try {
+            const perm = await Notification.requestPermission();
+            if (perm !== "granted") { toast("Notifications are blocked for this site. Allow them in the browser settings."); return; }
+            const reg = await navigator.serviceWorker.ready;
+            const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlB64ToU8(S.vapid) });
+            const label = (navigator.userAgent.match(/Android|iPhone|iPad|Windows|Mac/) || ["phone"])[0];
+            const id = await store.subscribePush(sub.toJSON(), m.id, {}, label);
+            lsSet("pt.pushId", id); buzz(); toast("Reminders on. Sending a test…");
+            try { await store.testPush(id); } catch (e) { toast(e.message); }
+            renderSettings(false);
+          } catch (e) { toast("Couldn't turn on reminders: " + e.message); }
+        } }));
+    } else {
+      const who = person(mine.pid);
+      const pr = Object.assign({ on: true, am: true, pm: true, ev: true, risk: true, amAt: "07:00", amWeekendAt: "08:00", pmAt: "15:30", evAt: "18:30", riskAt: "20:00" }, mine.prefs || {});
+      const canEdit = m && (m.id === mine.pid || isAdult(m));
+      const save = (patch) => safe(() => store.setPushPrefs(mine.id, patch, m ? m.id : undefined), "Saved");
+      const tgl = (key, label, timeKey) => el("label", { class: "tgl" }, [el("input", { type: "checkbox", checked: !!pr[key], disabled: !canEdit, onchange: (e) => save({ [key]: e.target.checked }) }), el("span", { text: label }),
+        timeKey ? el("input", { type: "time", value: pr[timeKey], disabled: !canEdit, onchange: (e) => { if (e.target.value) save({ [timeKey]: e.target.value }); } }) : null]);
+      card.append(el("div", { class: "row", style: "justify-content:space-between" }, [el("b", { text: "This phone: " + (who ? who.name : "?") + (pr.on ? "" : " (paused)") }), el("span", { class: "pill " + (pr.on ? "good" : ""), text: pr.on ? "On" : "Off" })]),
+        tgl("on", "Reminders on"), tgl("am", "Morning, school days at", "amAt"), tgl("am", "Morning, weekends at", "amWeekendAt"), tgl("pm", "After school at", "pmAt"), tgl("ev", "Evening at", "evAt"), tgl("risk", "Streak-saver at", "riskAt"),
+        el("div", { class: "row" }, [el("button", { class: "btn ghost", type: "button", text: "Send a test", onclick: () => safe(() => store.testPush(mine.id), "Sent") }),
+          el("button", { class: "btn ghost", type: "button", text: "Turn off on this phone", onclick: async () => { await safe(async () => { try { const reg = await navigator.serviceWorker.ready; const sub = await reg.pushManager.getSubscription(); if (sub) await sub.unsubscribe(); } catch (e) {} await store.deletePush(mine.id); try { localStorage.removeItem("pt.pushId"); } catch (e) {} renderSettings(false); }, "Reminders off"); } })]),
+        el("small", { class: "note", text: "Quiet hours are fixed: kids 8:30pm to 6:30am, grown-ups 9:30pm to 6:30am. Six ignored nudges in a row and the reminders pause themselves." }));
+    }
+    // grown-ups see every phone and every text setting
+    if (isAdult(m)) {
+      const others = S.push.filter((x) => x.id !== myId);
+      if (others.length) card.append(el("div", { class: "eyebrow", text: "Other phones" }), ...others.map((x) => { const who = person(x.pid); const on = !x.prefs || x.prefs.on !== false;
+        return el("div", { class: "row", style: "justify-content:space-between" }, [el("span", { text: (who ? who.name : "?") + " · " + (x.label || "phone") }),
+          el("button", { class: "chip" + (on ? " on" : ""), type: "button", text: on ? "On" : "Off", onclick: () => safe(() => store.setPushPrefs(x.id, { on: !on }, m.id)) })]); }));
+      const texters = family().filter((p) => p.phone);
+      if (S.sms && texters.length) card.append(el("div", { class: "eyebrow", text: "Texts" }), ...texters.map((p) => el("div", { class: "row", style: "justify-content:space-between" }, [el("span", { text: p.name + " · " + p.phone + (p.sms ? " · texts on" : " · texts off") }),
+        el("button", { class: "chip", type: "button", text: "Send a test text", onclick: () => safe(() => store.testSms(p.id, m.id), "Text sent") })])), el("small", { class: "note", text: "One text a day at most, mid-afternoon on school days, only if nothing is on the chart for that person. Numbers are set in the family list above." }));
+      else if (!S.sms && texters.length) card.append(el("small", { class: "note", text: "Texts: no SMS gateway is configured on this server." }));
+    }
+  };
+  draw();
+  return card;
 }
 
 /* ---------- today ---------- */
@@ -453,7 +563,8 @@ function renderToday() {
       bar(pl.pct, "big"),
       el("div", { class: "row small muted", style: "justify-content:space-between" }, [
         el("span", { text: pl.next ? (pl.next - sc.puppy.points) + " to " + pl.nextName : "Top level!" }),
-        el("span", { text: sc.puppy.mastered + " of " + sc.puppy.total + " skills · " + sc.puppy.sessions + " sessions" })])
+        el("span", { text: sc.puppy.mastered + " of " + sc.puppy.total + " skills · " + sc.puppy.sessions + " sessions" })]),
+      sc.challenge ? el("button", { class: "chal", type: "button", onclick: () => show("pack"), text: sc.challenge.e + " " + sc.challenge.nm + ": " + sc.challenge.progress + "/" + sc.challenge.target + (sc.challenge.won ? " ✓" : "") }) : null
     ]));
   }
 
@@ -597,6 +708,13 @@ function renderPack() {
     el("small", { class: "muted", text: "Best run: " + sc.pack.best + ". This week the pack has done " + sc.pack.weekSessions + " of " + sc.pack.weekTarget + " sessions." }),
     bar(sc.pack.weekTarget ? (sc.pack.weekSessions / sc.pack.weekTarget) * 100 : 0, "")
   ]));
+  if (sc.challenge) {
+    const ch = sc.challenge;
+    P.append(el("div", { class: "card challenge" + (ch.won ? " won" : "") }, [
+      el("div", { class: "row", style: "justify-content:space-between" }, [el("div", { class: "eyebrow", text: "This week's challenge" }), el("span", { class: "pill " + (ch.won ? "good" : "warm"), text: ch.won ? "Won! +" + (C.challengePoints || 25) + " each" : ch.progress + " of " + ch.target })]),
+      el("div", { class: "row" }, [el("span", { class: "bigemoji", text: ch.e }), el("div", {}, [el("h3", { text: ch.nm }), el("p", { class: "note", text: pupName() + " says: " + T(ch.ask) })])]),
+      bar(ch.pct, "")]));
+  }
   // the podium: ranked by percent of your own goal, so a kid with 21 and a parent with 10 race fairly. Resets Sunday.
   const ranked = family().map((p) => ({ p, s: scoreOf(p.id) })).filter((x) => x.s).sort((a, b) => b.s.weekPct - a.s.weekPct || b.s.weekSessions - a.s.weekSessions || a.p.name.localeCompare(b.p.name));
   const medals = ["🥇", "🥈", "🥉"];
@@ -803,6 +921,19 @@ function renderHelp() {
   const P = $("#p-help"); P.replaceChildren();
   P.append(el("div", { class: "sos" }, [el("div", { class: "eyebrow", style: "color:inherit;opacity:.85", text: "SOS" }), el("h2", { text: T(C.sos.title) }),
     el("ol", {}, C.sos.steps.map((x) => el("li", { text: T(x) })))]));
+  if (C.kids) {
+    const K = C.kids;
+    P.append(el("div", { class: "eyebrow", text: "Kids and " + pupName() }));
+    P.append(el("div", { class: "card focus" }, [el("h2", { class: "h2", text: "The rules that keep everyone safe" }), el("p", { class: "note", style: "margin-top:6px", text: T(K.intro) })]));
+    P.append(el("details", { class: "acc", id: "kids-rules" }, [el("summary", {}, el("div", { class: "nm" }, [el("h3", { text: "Our seven rules" }), el("small", { text: "Food, sleeping dogs, hugs, running, and when to call a grown-up" })])), el("div", { class: "acc-body" }, [el("ol", { class: "steps" }, K.rules.map((x) => el("li", { text: T(x) }))), el("div", { class: "dont" }, [el("b", { text: "If she bites you: " }), T(K.bite)])])]));
+    [K.consent, K.tree].forEach((g, i) => P.append(el("details", { class: "acc", id: "kids-" + i }, [el("summary", {}, el("div", { class: "nm" }, [el("h3", { text: T(g.nm) })])), el("div", { class: "acc-body" }, [el("ol", { class: "steps" }, g.steps.map((x) => el("li", { text: T(x) }))), el("p", { class: "note", text: T(g.why) })])])));
+    P.append(el("details", { class: "acc", id: "kids-signals" }, [el("summary", {}, el("div", { class: "nm" }, [el("h3", { text: "Read her: green, amber, red" }), el("small", { text: "Spot an amber signal and give her space: that's a point" })])), el("div", { class: "acc-body" }, [
+      el("div", { class: "do" }, [el("b", { text: "🟢 Green, keep going" }), el("ul", {}, K.signals.green.map((x) => el("li", { text: T(x) })))]),
+      el("div", { class: "callout" }, [el("b", { text: "🟡 Amber, she's unsure, give space" }), el("ul", { class: "plain", style: "margin-top:4px" }, K.signals.amber.map((x) => el("li", { text: T(x) })))]),
+      el("div", { class: "dont" }, [el("b", { text: "🔴 Red, stop now, grown-up takes over" }), el("ul", {}, K.signals.red.map((x) => el("li", { text: T(x) })))]),
+      el("p", { class: "note", text: T(K.signalsNote) })])]));
+    P.append(el("details", { class: "acc", id: "kids-ages" }, [el("summary", {}, el("div", { class: "nm" }, [el("h3", { text: "What each age can do" }), el("small", { text: "With a grown-up in the room, always" })])), el("div", { class: "acc-body" }, K.ages.map(([age, can, not]) => el("div", { class: "card", style: "display:grid;gap:6px;padding:12px" }, [el("b", { text: "Age " + age }), el("div", { class: "do" }, [el("b", { text: "Can: " }), T(can)]), el("div", { class: "dont" }, [el("b", { text: "Not yet: " }), T(not)])])))]));
+  }
   P.append(el("div", { class: "eyebrow", text: "Stop the biting, in bite-sized pieces" }));
   C.biting.forEach((b) => {
     const body = el("div", { class: "acc-body" }, b.body.map((x) => el("p", { text: T(x) })));

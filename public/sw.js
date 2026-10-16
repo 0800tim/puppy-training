@@ -1,6 +1,6 @@
 /* Service worker: caches the app shell so it opens instantly and works offline.
    The family chart (api/*) always goes to the network. Bump VERSION when shipping changes. */
-const VERSION = "pt-v5";
+const VERSION = "pt-v7";
 const SHELL = ["./", "index.html", "styles.css", "content.js", "rewards.js", "theme.js", "app.js", "manifest.webmanifest", "icon.svg", "icon-192.png", "icon-512.png", "apple-touch-icon.png"];
 
 self.addEventListener("install", (e) => {
@@ -19,4 +19,18 @@ self.addEventListener("fetch", (e) => {
       return res;
     }).catch(() => caches.match(e.request).then((r) => r || caches.match("index.html")))
   );
+});
+
+self.addEventListener("push", (e) => {
+  let d = {}; try { d = e.data ? e.data.json() : {}; } catch (err) { d = { body: e.data && e.data.text() }; }
+  e.waitUntil(self.registration.showNotification(d.title || "Puppy School HQ", { body: d.body || "", tag: d.tag || "puppy", icon: "icon-192.png", badge: "icon-192.png", data: { url: d.url || "/#today" }, renotify: false }));
+});
+self.addEventListener("notificationclick", (e) => {
+  e.notification.close();
+  const url = new URL((e.notification.data && e.notification.data.url) || "/#today", self.location.origin).href;
+  e.waitUntil(self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
+    const w = list.find((c) => "focus" in c);
+    if (w) { w.navigate(url); return w.focus(); }
+    return self.clients.openWindow(url);
+  }));
 });

@@ -240,8 +240,29 @@
       me.badges = b;
     });
 
+    // this week's challenge: rotates by week number; the family wins it together
+    let challenge = null;
+    if (C.challenges && C.challenges.length) {
+      const weekNo = Math.floor((parseIso(thisMon) - parseIso("2026-01-05")) / 864e5 / 7);
+      const ch = C.challenges[((weekNo % C.challenges.length) + C.challenges.length) % C.challenges.length];
+      const wkDays = []; for (let i = 0; i < 7; i++) wkDays.push(addDays(thisMon, i));
+      const hat = (d) => fam.filter((p) => days[d] && days[d][p.id] && days[d][p.id].n >= 3).length;
+      let progress = 0, target = ch.target;
+      if (ch.id === "early") wkDays.forEach((d) => fam.forEach((p) => { const t = days[d] && days[d][p.id] && days[d][p.id].slots.am; if (t && t.at && hourOf(t.at) < 8) progress++; }));
+      else if (ch.id === "fullhouse") { target = fam.length; progress = fam.filter((p) => wkDays.some((d) => days[d] && days[d][p.id] && days[d][p.id].n >= 3)).length; }
+      else if (ch.id === "diary") progress = wkDays.filter((d) => d <= todayS && logs[d] && logs[d].bite).length;
+      else if (ch.id === "quiet") { const r = wkDays.filter((d) => logs[d] && logs[d].bite).map((d) => logs[d].bite); progress = r.length >= 1 && r.reduce((a, b) => a + b, 0) / r.length <= 2 ? r.length : 0; }
+      else if (ch.id === "nofreeze") { const used = fam.reduce((a, p) => a + (2 - people[p.id].freezesLeft), 0); progress = used ? 0 : wkDays.filter((d) => d <= todayS).length; }
+      else if (ch.id === "graduate") progress = C.skills.filter((sk) => { const v = ((state.mastery && state.mastery[sk.id] && state.mastery[sk.id].done) || []).filter((x) => !x.void); if (!st[sk.id].mastered) return false; const last = v.map((x) => x.at).sort((a, b) => a - b)[Math.min(v.length, st[sk.id].need) - 1]; return last && iso(new Date(last)) >= thisMon; }).length;
+      else if (ch.id === "dry") progress = wkDays.filter((d) => { const L = tByDay[d] || []; return L.some((t) => t.kind !== "accident") && !L.some((t) => t.kind === "accident"); }).length;
+      else if (ch.id === "pack") progress = wkDays.filter((d) => d <= todayS && packDay(d)).length;
+      else if (ch.id === "hattrick") progress = wkDays.reduce((a, d) => a + hat(d), 0);
+      const won = target > 0 && progress >= target;
+      challenge = { id: ch.id, nm: ch.nm, e: ch.e, ask: ch.ask, progress, target, won, pct: target ? Math.min(100, Math.round((progress / target) * 100)) : 0 };
+      if (won) fam.forEach((p) => { people[p.id].points += C.challengePoints || 25; people[p.id].level = levelOf(people[p.id].points, C.levels); });
+    }
     return {
-      today: todayS, people, skills: st,
+      today: todayS, people, skills: st, challenge,
       pack: { streak: packStreak, best: packBest, days: packDays, weekSessions: fam.reduce((a, p) => a + people[p.id].weekSessions, 0), weekTarget: fam.reduce((a, p) => a + people[p.id].target, 0) },
       puppy, biteWeek, calmDays,
       toilet: { today: todayToilet, lastOut, interval, accidentsAfter, ageWeeks },

@@ -442,6 +442,76 @@ const PUPPY_CONTENT = {
   ],
   toiletKinds: [["wee", "Wee"], ["poo", "Poo"], ["accident", "Accident inside"]],
   toiletBefore: [["woke", "Just woke up"], ["ate", "After eating"], ["played", "After play"], ["other", "Other"]],
-  toiletInterval: [[14, 60], [22, 90], [30, 180], [99, 240]]
+  toiletInterval: [[14, 60], [22, 90], [30, 180], [99, 240]],
+
+  /* ---------- nudges: puppy-voiced, no guilt, rotated so nobody sees the same line twice in a week ---------- */
+  nudges: {
+    am: [
+      "{pup}'s awake and has opinions. 5 minutes of {skill} before school?",
+      "Morning, {name}. {pup} would like to open the day with {skill}.",
+      "Treat pouch check. {pup} says now would be good for {skill}.",
+      "{pup} slept well and is ready to be a genius. {skill}, 5 minutes?"
+    ],
+    pm: [
+      "Afternoon slot's empty, {name}. {pup} has been practising {her} sad eyes.",
+      "Bag down, treats out: {skill} with {pup} before the zoomies start.",
+      "{pup} says the afternoon is for {skill}. Two minutes counts.",
+      "Rain or shine, {skill} works in the hall. {pup}'s ready when you are."
+    ],
+    ev: [
+      "One more before bed? {pup} picked {skill}, and a calm puppy sleeps better.",
+      "Evening slot's open, {name}. A short {skill} session, then a chew and bed for {pup}.",
+      "{pup} would like to end the day on a win. {skill}, then lights out."
+    ],
+    sms: [
+      "{pup} here. Nothing on the chart from you yet today, {name}. Your mission: {skill}. 5 minutes is plenty. puppy.appspurt.com",
+      "Hi {name}, it's {pup}. Your afternoon mission is {skill}. Tap it off when you're done. puppy.appspurt.com"
+    ],
+    risk: "No sessions yet today, {name}. One 5-minute go keeps your {streak}-day streak. No stress if not, you've got a freeze.",
+    exitTitle: "Reminders are having a rest",
+    exit: "{pup}'s reminders are having a rest. Open Settings to turn them back on whenever you like."
+  },
+
+  /* ---------- kids and the puppy: the safety module (Reisner 2007, Family Paws, Doggone Safe, Lili Chin) ---------- */
+  kids: {
+    intro: "Most bites to kids happen with a grown-up right there, over food, during a hug, or to a sleeping dog. These are the rules in our house, and the games that keep everyone safe.",
+    rules: [
+      "Food and chews are hers. Never go near her while she eats or chews, and never take something off her. Call a grown-up.",
+      "A resting dog is left alone. No waking her, no climbing into the crate, no hugging a sleeping puppy.",
+      "No hugs, no face-to-face, no leaning over her. Pat her chest or side, from beside her.",
+      "No running, chasing or shrieking games around her. If you want to play tag, she goes in her pen with a chew first.",
+      "If she walks away, the game is over. Never follow, grab or hold a puppy who is leaving.",
+      "A grown-up is in the room, watching, every time. Not just nearby.",
+      "Anything that might scare or hurt her (nails, bath, taking something from her mouth, the vet) is a grown-up's job."
+    ],
+    consent: { nm: "Pat, Pet, Pause: does she want a cuddle?", steps: ["Pat your leg and wait. Don't reach for her. If she comes over, go to step 2. If she doesn't, that's her answer.", "Pet for three seconds, chest or side, one hand.", "Pause. Take your hand away. If she leans in or nudges, pet again. If she turns away, yawns, walks off or goes stiff, stop."], why: "Score it: did she say yes? Three seconds then a pause also stops petting from winding her up into mouthing." },
+    tree: { nm: "Be a Tree: when she's jumping and nipping", steps: ["Stop. Stand still.", "Fold your branches: arms in, hands clasped at your front.", "Watch your roots: look at your feet, not at her.", "Count your breaths until she gets bored or a grown-up calls her away."], why: "Trees are boring. Running, squealing and flapping are the best game she has ever seen." },
+    signals: {
+      green: ["Loose, wiggly body", "Soft eyes, mouth open and soft", "Play bow", "Leaning in", "Comes back for more"],
+      amber: ["Yawning when she's not tired", "Licking her lips with no food around", "Turning her head away", "Whites of her eyes showing", "One paw lifted", "A shake-off like she's wet", "Suddenly sniffing the ground", "Ears pinned back"],
+      red: ["Body stiff or frozen", "Hard stare", "Closed mouth, lips pulled back", "Growl", "Hackles up", "Tail tucked, hiding", "Snap"]
+    },
+    signalsNote: "Green: keep going. Amber: she's unsure, give her space and the point goes to whoever spotted it. Red: stop now, a grown-up takes over. A growl is a warning she's kind enough to give; never punish it.",
+    ages: [
+      ["5 to 9", "Mark-and-treat games for skills she knows, treat tossing, find-it, hand-feeding from a flat hand, scatter feeding, spotting signals, filling a Kong with help.", "Walking her on lead, picking her up, the trade game alone, tug (she wins the arm)."],
+      ["10 to 11", "All of that, plus luring new tricks, two-person recall, loose-lead in the yard, It's Yer Choice with a grown-up watching, feeding meals (grown-up stands by).", "The lead near roads, anything with a growl, interrupting her with a stolen thing."],
+      ["12 to 14", "Lead walks on quiet streets once she walks nicely, stay and recall with distractions, running her nap and enrichment schedule, leading a session for younger siblings.", "Being the only person in charge of her around younger kids, visitors' dogs, off-lead in public."]
+    ],
+    bite: "If she bites you: freeze, go quiet, put a toy in her mouth or step away. No squealing. Squealing kids are the most exciting thing a herding puppy has ever heard."
+  },
+
+  /* ---------- weekly challenges: one at a time, puppy-voiced, the family wins together ---------- */
+  challenges: [
+    { id: "early", nm: "Early Birds", e: "🌅", ask: "I'm sharpest in the morning. Give me 12 before-8am sessions this week.", target: 12 },
+    { id: "fullhouse", nm: "Full House", e: "🎩", ask: "Everyone gets one hat-trick day (all three slots) this week.", target: 0 },
+    { id: "diary", nm: "Bite Diary", e: "📝", ask: "Rate my bitey-ness every single day this week, so you can see me improving.", target: 7 },
+    { id: "quiet", nm: "Quiet Mouth", e: "🧘", ask: "Average Gentle or better across at least five rated days.", target: 5 },
+    { id: "nofreeze", nm: "Zero Freeze", e: "🧊", ask: "Nobody needs a streak freeze all week. Seven clean days.", target: 7 },
+    { id: "graduate", nm: "Graduation Week", e: "🎓", ask: "Master two skills this week. Three people, a witness each.", target: 2 },
+    { id: "dry", nm: "Dry Days", e: "☀️", ask: "Three days with outside trips and no accidents inside.", target: 3 },
+    { id: "pack", nm: "Pack Week", e: "🐾", ask: "Four days where every single person trained.", target: 4 },
+    { id: "hattrick", nm: "Hat-trick Hunt", e: "🏆", ask: "Ten hat-trick days across the whole family.", target: 10 }
+  ],
+  challengePoints: 25
 };
 if (typeof module === "object" && module.exports) module.exports = PUPPY_CONTENT; else window.PUPPY_CONTENT = PUPPY_CONTENT;
