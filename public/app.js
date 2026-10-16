@@ -240,7 +240,7 @@ function ring(n, total, size, color) {
 function bar(pct, cls) { return el("div", { class: "bar " + (cls || "") }, el("i", { style: "width:" + Math.max(0, Math.min(100, pct)) + "%" })); }
 function sparkline(vals) {
   const w = 7 * 12, h = 28;
-  const pts = vals.map((v, i) => v ? '<rect x="' + (i * 12 + 2) + '" y="' + (h - v * 5) + '" width="8" height="' + v * 5 + '" rx="2" fill="' + (v <= 2 ? "var(--good)" : v === 3 ? "var(--warn)" : "var(--bad)") + '"/>' : '<rect x="' + (i * 12 + 2) + '" y="' + (h - 2) + '" width="8" height="2" rx="1" fill="var(--line)"/>').join("");
+  const pts = vals.map((v, i) => v ? '<rect x="' + (i * 12 + 2) + '" y="' + (h - v * 5) + '" width="8" height="' + v * 5 + '" rx="2" fill="' + (v <= 2 ? "var(--good)" : v === 3 ? "var(--warn)" : "var(--bad)") + '"/>' : '<rect x="' + (i * 12 + 2) + '" y="' + (h - 3) + '" width="8" height="3" rx="1.5" fill="currentColor" opacity=".3"/>').join("");
   return el("span", { class: "spark", html: '<svg viewBox="0 0 ' + w + " " + h + '" width="' + w + '" height="' + h + '" aria-label="Bite meter this week">' + pts + "</svg>" });
 }
 
@@ -590,7 +590,7 @@ function renderToday() {
     const my = scoreOf(m.id);
     const card = el("div", { class: "card mine", style: "--c:" + colorOf(m) }, [
       el("div", { class: "row", style: "justify-content:space-between" }, [
-        el("div", { class: "who" }, [avatar(m), el("div", {}, [el("b", { text: "Your missions, " + m.name }), el("small", {}, my && my.streak ? [icon("flame", "inl"), my.streak + "-day streak" + (my.atRisk ? ", train today to keep it" : "")] : ["Start a streak today"])])]),
+        el("div", { class: "who" }, [avatar(m), el("div", {}, [el("b", { text: "Your missions, " + m.name }), el("small", {}, my && my.streak ? [icon("flame", "inl flame"), my.streak + "-day streak" + (my.atRisk ? ", train today to keep it" : "")] : ["Start a streak today"])])]),
         my ? ring(my.today, 3, 48, colorOf(m)) : null]),
       el("div", { class: "slots" }, C.slots.map((s) => slotButton(d, m, s, true))),
       el("p", { class: "note", text: "Warm up with something " + T("she") + " knows, two minutes on the mission, finish on a win." })
@@ -606,7 +606,7 @@ function renderToday() {
     if (m && p.id === m.id && isToday) return;
     const ps = scoreOf(p.id);
     const row = el("div", { class: "prow", style: "--c:" + colorOf(p) }, [
-      el("div", { class: "who" }, [avatar(p), el("div", {}, [el("b", { text: p.name }), el("small", {}, ps ? [ps.streak ? icon("flame", "inl") : null, (ps.streak ? ps.streak + " · " : "") + "Lv " + ps.level.n + " " + ps.level.name] : [])])]),
+      el("div", { class: "who" }, [avatar(p), el("div", {}, [el("b", { text: p.name }), el("small", {}, ps ? [ps.streak ? icon("flame", "inl flame") : null, (ps.streak ? ps.streak + " · " : "") + "Lv " + ps.level.n + " " + ps.level.name] : [])])]),
       ps && isToday ? ring(ps.today, 3, 40, colorOf(p)) : el("div", { class: "mins-today", text: C.slots.filter((s) => S.ticks[tickKey(d, p.id, s.id)]).length * 5 + " min" })
     ]);
     row.append(el("div", { class: "slots" }, C.slots.map((s) => slotButton(d, p, s, false))));
