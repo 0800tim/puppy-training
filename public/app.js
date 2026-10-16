@@ -69,7 +69,10 @@ const weekIndex = (d) => Math.floor((d - startDate()) / 864e5 / 7);
 const pupName = () => (S.settings && S.settings.puppy.name) || "your puppy";
 const skillById = (id) => C.skills.find((s) => s.id === id) || null;
 const BITE = [["😇", "Angel"], ["🙂", "Gentle"], ["😬", "Mouthy"], ["😣", "Bitey"], ["🦈", "Shark"]];
-const SLOT_EMOJI = { am: "🌅", pm: "☀️", ev: "🌙" };
+const SLOT_ICON = { am: "sunrise", pm: "sun", ev: "moon" };
+const BADGE_COLOUR = { "Showing up": "var(--sun)", Streaks: "var(--accent)", Skills: "var(--hdr2)", Biting: "var(--grass)", Toilet: "var(--p6)", Socialising: "var(--p3)", Teamwork: "var(--p5)" };
+function icon(name, cls) { const n = document.createElementNS("http://www.w3.org/2000/svg", "svg"); n.setAttribute("class", "ic" + (cls ? " " + cls : "")); n.setAttribute("aria-hidden", "true"); const u = document.createElementNS("http://www.w3.org/2000/svg", "use"); u.setAttribute("href", "#i-" + name); n.append(u); return n; }
+function disc(name, colour, cls) { return el("span", { class: "disc" + (cls ? " " + cls : ""), style: "--dc:" + (colour || "var(--accent)") }, icon(name)); }
 
 /* ---------- who is on this phone ---------- */
 let meId = lsGet("pt.me", null);
@@ -244,10 +247,10 @@ function sparkline(vals) {
 /* ---------- header ---------- */
 function renderHeader() {
   const st = S.settings;
-  $("#pupTitle").textContent = st && st.puppy.name ? st.puppy.name + "'s Puppy School" : "Puppy School HQ";
+  $("#pupTitle").textContent = st && st.puppy.name ? st.puppy.name : "Puppy School HQ";
   const born = st && parseIso(st.puppy.born);
   let line = (st && st.puppy.breed) || "Family puppy training";
-  if (born) { const days = Math.round((today - born) / 864e5); if (days >= 0) line += " · " + Math.floor(days / 7) + " weeks old"; }
+  if (born) { const days = Math.round((today - born) / 864e5); if (days >= 0) line = Math.floor(days / 7) + " weeks · " + line; }
   $("#pupAge").textContent = line;
   $("#gear").hidden = !st;
   const badge = $("#badge");
@@ -536,8 +539,9 @@ function slotButton(d, p, slot, big) {
     if (!own && !confirm("Log this " + slot.t.toLowerCase() + " session for " + p.name + "?")) return;
     await safe(async () => { await store.setTick(k, true, { by: m.id, skill: sk ? sk.id : undefined }); buzz(); toast(own ? "Nice one, " + p.name + "! +" + C.points.session : "Logged for " + p.name + " by " + m.name); });
   } }, [
-    el("span", { class: "t", text: (on ? "✓ " : "") + slot.t }),
-    big ? el("span", { class: "sk", text: sk ? T(sk.nm) : slot.s }) : el("span", { text: on && t.by && t.by !== p.id && person(t.by) ? "by " + person(t.by).name : slot.s })
+    on ? icon("check", "sl") : icon(SLOT_ICON[slot.id], "sl"),
+    el("span", { class: "t", text: slot.t }),
+    big ? el("span", { class: "sk", text: sk ? T(sk.nm) : slot.s }) : el("span", { class: "sk", text: on && t.by && t.by !== p.id && person(t.by) ? "by " + person(t.by).name : slot.s })
   ]);
   if (big && mission && !on) b.title = "Mission: " + (sk ? sk.nm : "");
   if (big && on && (own || isAdult(m)) && S.scores) {
@@ -558,15 +562,18 @@ function renderToday() {
   // the puppy's progress: the shared number
   if (sc) {
     const pl = sc.puppy.level;
-    P.append(el("div", { class: "card hero", style: "--c:var(--blaze)" }, [
-      el("div", { class: "row", style: "justify-content:space-between;align-items:flex-start" }, [
-        el("div", {}, [el("div", { class: "eyebrow", text: pupName() + "'s progress" }), el("h2", { text: "Level " + pl.n + ": " + pl.name })]),
-        sparkline(sc.biteWeek)]),
+    const photo = store && S.photo ? el("img", { src: store.photoUrl(), alt: "" }) : icon("paw");
+    P.append(el("div", { class: "card hero" }, [
+      el("div", { class: "hero-top" }, [
+        el("div", { class: "hero-pup" }, [photo, el("span", { class: "lvl-badge", text: pl.n })]),
+        el("div", { class: "hero-txt" }, [el("div", { class: "eyebrow", text: pupName() + " · level " + pl.n + " of " + C.puppyLevels.length }), el("h2", { text: pl.name }), el("small", { text: pl.next ? (pl.next - sc.puppy.points) + " points to " + pl.nextName : "Top of the tree" })])]),
       bar(pl.pct, "big"),
-      el("div", { class: "row small muted", style: "justify-content:space-between" }, [
-        el("span", { text: pl.next ? (pl.next - sc.puppy.points) + " to " + pl.nextName : "Top level!" }),
-        el("span", { text: sc.puppy.mastered + " of " + sc.puppy.total + " skills · " + sc.puppy.sessions + " sessions" })]),
-      sc.challenge ? el("button", { class: "chal", type: "button", onclick: () => show("pack"), text: sc.challenge.e + " " + sc.challenge.nm + ": " + sc.challenge.progress + "/" + sc.challenge.target + (sc.challenge.won ? " ✓" : "") }) : null
+      el("div", { class: "hero-stats" }, [
+        el("div", { class: "hs" }, [el("b", { text: sc.puppy.mastered + "/" + sc.puppy.total }), el("small", { text: "skills" })]),
+        el("div", { class: "hs" }, [el("b", { text: String(sc.puppy.sessions) }), el("small", { text: "sessions" })]),
+        el("div", { class: "hs" }, [el("b", { text: String(sc.calmDays) }), el("small", { text: "calm days" })]),
+        el("div", { class: "hs spark" }, [sparkline(sc.biteWeek), el("small", { text: "bite week" })])]),
+      sc.challenge ? el("button", { class: "chal", type: "button", onclick: () => show("pack") }, [icon(sc.challenge.icon || "star"), el("span", { text: sc.challenge.nm + " · " + sc.challenge.progress + "/" + sc.challenge.target + (sc.challenge.won ? " · won" : "") }), icon("chevron")]) : null
     ]));
   }
 
@@ -583,10 +590,10 @@ function renderToday() {
     const my = scoreOf(m.id);
     const card = el("div", { class: "card mine", style: "--c:" + colorOf(m) }, [
       el("div", { class: "row", style: "justify-content:space-between" }, [
-        el("div", { class: "who" }, [avatar(m), el("div", {}, [el("b", { text: "Your missions, " + m.name }), el("small", { text: my ? (my.streak ? "🔥 " + my.streak + "-day streak" + (my.atRisk ? " (train today to keep it)" : "") : "Start a streak today") : "" })])]),
+        el("div", { class: "who" }, [avatar(m), el("div", {}, [el("b", { text: "Your missions, " + m.name }), el("small", {}, my && my.streak ? [icon("flame", "inl"), my.streak + "-day streak" + (my.atRisk ? ", train today to keep it" : "")] : ["Start a streak today"])])]),
         my ? ring(my.today, 3, 48, colorOf(m)) : null]),
       el("div", { class: "slots" }, C.slots.map((s) => slotButton(d, m, s, true))),
-      el("p", { class: "note", text: "Each mission is one skill the dealer picked for you. Warm up with something " + T("she") + " knows, 2 minutes on the mission, finish on a win. Did a different skill? Change it under the tick." })
+      el("p", { class: "note", text: "Warm up with something " + T("she") + " knows, two minutes on the mission, finish on a win." })
     ]);
     P.append(card);
   } else if (!m && S.settings) {
@@ -599,7 +606,7 @@ function renderToday() {
     if (m && p.id === m.id && isToday) return;
     const ps = scoreOf(p.id);
     const row = el("div", { class: "prow", style: "--c:" + colorOf(p) }, [
-      el("div", { class: "who" }, [avatar(p), el("div", {}, [el("b", { text: p.name }), el("small", { text: ps ? (ps.streak ? "🔥 " + ps.streak + " · " : "") + "Lv " + ps.level.n + " " + ps.level.name : "" })])]),
+      el("div", { class: "who" }, [avatar(p), el("div", {}, [el("b", { text: p.name }), el("small", {}, ps ? [ps.streak ? icon("flame", "inl") : null, (ps.streak ? ps.streak + " · " : "") + "Lv " + ps.level.n + " " + ps.level.name] : [])])]),
       ps && isToday ? ring(ps.today, 3, 40, colorOf(p)) : el("div", { class: "mins-today", text: C.slots.filter((s) => S.ticks[tickKey(d, p.id, s.id)]).length * 5 + " min" })
     ]);
     row.append(el("div", { class: "slots" }, C.slots.map((s) => slotButton(d, p, s, false))));
@@ -650,9 +657,9 @@ function renderToilet(P, sc, m) {
   } else card.append(el("p", { class: "note", text: "At " + tl.ageWeeks + " weeks: out on waking, after meals, after play, and about every " + tl.interval + " minutes awake. Log each trip and the app will tell you when the next one is due." }));
   let pendingKind = null;
   const beforeRow = el("div", { class: "chips", hidden: true });
-  const kinds = el("div", { class: "tbtns" }, C.toiletKinds.map(([k, l]) => el("button", { class: "tbtn " + k, type: "button", text: (k === "wee" ? "💧 " : k === "poo" ? "💩 " : "⚠️ ") + l, onclick: () => {
-    pendingKind = k; beforeRow.hidden = false; kinds.querySelectorAll("button").forEach((b) => b.classList.toggle("sel", b.textContent.includes(l)));
-  } })));
+  const kinds = el("div", { class: "tbtns" }, C.toiletKinds.map(([k, l]) => el("button", { class: "tbtn " + k, type: "button", "data-k": k, onclick: () => {
+    pendingKind = k; beforeRow.hidden = false; kinds.querySelectorAll("button").forEach((b) => b.classList.toggle("sel", b.dataset.k === k));
+  } }, [icon(k === "wee" ? "drop" : k === "poo" ? "leaf" : "alert"), el("span", { text: l })])));
   const log = async (before) => {
     if (!pendingKind) return;
     const k = pendingKind; pendingKind = null; beforeRow.hidden = true;
@@ -662,7 +669,7 @@ function renderToilet(P, sc, m) {
   card.append(kinds, beforeRow);
   const todayList = tl.today.slice(-6).reverse();
   if (todayList.length) card.append(el("div", { class: "tlist" }, todayList.map((t) => el("div", { class: "row small" }, [
-    el("span", { text: (t.kind === "wee" ? "💧" : t.kind === "poo" ? "💩" : "⚠️") + " " + new Date(t.at).toLocaleTimeString("en-NZ", { hour: "numeric", minute: "2-digit" }) + (t.before ? " · " + (C.toiletBefore.find((b) => b[0] === t.before) || ["", ""])[1].toLowerCase() : "") + (t.by && person(t.by) ? " · " + person(t.by).name : "") }),
+    el("span", {}, [icon(t.kind === "wee" ? "drop" : t.kind === "poo" ? "leaf" : "alert", "inl"), " " + new Date(t.at).toLocaleTimeString("en-NZ", { hour: "numeric", minute: "2-digit" }) + (t.before ? " · " + (C.toiletBefore.find((b) => b[0] === t.before) || ["", ""])[1].toLowerCase() : "") + (t.by && person(t.by) ? " · " + person(t.by).name : "")]),
     el("button", { class: "linkbtn", type: "button", text: "undo", onclick: () => safe(() => store.voidToilet(t.id)) })]))));
   const worst = Object.entries(tl.accidentsAfter).sort((a, b) => b[1] - a[1])[0];
   if (worst && worst[1] >= 2) card.append(el("p", { class: "note", text: "Pattern: most accidents happen " + (C.toiletBefore.find((b) => b[0] === worst[0]) || ["", ""])[1].toLowerCase() + ". Take " + T("her") + " out straight after that." }));
@@ -706,7 +713,7 @@ function renderPack() {
     el("p", { class: "note", style: "margin-top:6px", text: "Points for showing up, streaks with two free passes a week, badges for the good stuff. The podium ranks by percent of your own weekly goal, so a kid on 21 and a grown-up on 10 race fairly, and it resets every Sunday." })]));
   // pack streak + week
   P.append(el("div", { class: "card" }, [
-    el("div", { class: "row", style: "justify-content:space-between" }, [el("div", {}, [el("div", { class: "eyebrow", text: "Pack streak" }), el("h3", { text: sc.pack.streak + " day" + (sc.pack.streak === 1 ? "" : "s") + " where everyone trained" })]), el("span", { class: "bigemoji", text: sc.pack.streak >= 7 ? "🐾🔥" : "🐾" })]),
+    el("div", { class: "row", style: "justify-content:space-between" }, [el("div", {}, [el("div", { class: "eyebrow", text: "Pack streak" }), el("h3", { text: sc.pack.streak + " day" + (sc.pack.streak === 1 ? "" : "s") + " where everyone trained" })]), disc(sc.pack.streak >= 7 ? "flame" : "paw", "var(--p5)", "lg")]),
     el("small", { class: "muted", text: "Best run: " + sc.pack.best + ". This week the pack has done " + sc.pack.weekSessions + " of " + sc.pack.weekTarget + " sessions." }),
     bar(sc.pack.weekTarget ? (sc.pack.weekSessions / sc.pack.weekTarget) * 100 : 0, "")
   ]));
@@ -714,16 +721,16 @@ function renderPack() {
     const ch = sc.challenge;
     P.append(el("div", { class: "card challenge" + (ch.won ? " won" : "") }, [
       el("div", { class: "row", style: "justify-content:space-between" }, [el("div", { class: "eyebrow", text: "This week's challenge" }), el("span", { class: "pill " + (ch.won ? "good" : "warm"), text: ch.won ? "Won! +" + (C.challengePoints || 25) + " each" : ch.progress + " of " + ch.target })]),
-      el("div", { class: "row" }, [el("span", { class: "bigemoji", text: ch.e }), el("div", {}, [el("h3", { text: ch.nm }), el("p", { class: "note", text: pupName() + " says: " + T(ch.ask) })])]),
+      el("div", { class: "row", style: "flex-wrap:nowrap;align-items:flex-start" }, [disc(ch.icon || "star", "var(--sun)", "lg"), el("div", {}, [el("h3", { text: ch.nm }), el("p", { class: "note", text: pupName() + " says: " + T(ch.ask) })])]),
       bar(ch.pct, "")]));
   }
   // the podium: ranked by percent of your own goal, so a kid with 21 and a parent with 10 race fairly. Resets Sunday.
   const ranked = family().map((p) => ({ p, s: scoreOf(p.id) })).filter((x) => x.s).sort((a, b) => b.s.weekPct - a.s.weekPct || b.s.weekSessions - a.s.weekSessions || a.p.name.localeCompare(b.p.name));
-  const medals = ["🥇", "🥈", "🥉"];
+  const medalCol = ["#f6b73c", "#b8bcc9", "#cd7f45"];
   P.append(el("div", { class: "card", style: "display:grid;gap:8px" }, [
     el("div", { class: "row", style: "justify-content:space-between" }, [el("div", { class: "eyebrow", text: "This week's podium" }), el("small", { class: "muted", text: "Percent of your own goal. Resets Sunday night." })]),
     el("div", { class: "podium" }, ranked.map((x, i) => el("div", { class: "prow", style: "--c:" + colorOf(x.p) }, [
-      el("span", { class: "rank", text: medals[i] || String(i + 1) }),
+      el("span", { class: "rank" + (i < 3 ? " medal" : ""), style: i < 3 ? "--mc:" + medalCol[i] : "", text: String(i + 1) }),
       el("div", { class: "who" }, [avatar(x.p), el("div", {}, [el("b", { text: x.p.name }), el("small", { text: x.s.weekSessions + " of " + x.s.target + (x.s.streak ? " · 🔥 " + x.s.streak : "") })])]),
       el("span", { class: "pct", text: x.s.weekPct + "%" })])))
   ]));
@@ -747,9 +754,9 @@ function renderPack() {
     return el("div", { class: "prow pack", style: "--c:" + colorOf(p) }, [
       el("div", { class: "who" }, [avatar(p), el("div", {}, [el("b", { text: p.name + (m && m.id === p.id ? " (you)" : "") }), el("small", { text: "Level " + ps.level.n + " · " + ps.level.name + " · " + ps.points + " pts" })])]),
       el("div", { class: "stats" }, [
-        el("span", { class: "stat", text: "🔥 " + ps.streak, title: "Streak" }),
-        el("span", { class: "stat", text: "🧊 " + ps.freezesLeft, title: "Freezes left this week" }),
-        el("span", { class: "stat", text: "🏅 " + ps.badges.length, title: "Badges" })]),
+        el("span", { class: "stat", title: "Streak" }, [icon("flame"), String(ps.streak)]),
+        el("span", { class: "stat", title: "Freezes left this week" }, [icon("snow"), String(ps.freezesLeft)]),
+        el("span", { class: "stat", title: "Badges" }, [icon("medal"), String(ps.badges.length)])]),
       el("div", { class: "wk" }, [bar(ps.weekPct, ""), el("small", { class: "muted", text: ps.weekSessions + " of " + ps.target + " this week (" + ps.weekPct + "%) · best week " + ps.bestWeek })]),
       el("div", { class: "lvl" }, [bar(ps.level.pct, "thin"), el("small", { class: "muted", text: ps.level.next ? (ps.level.next - ps.points) + " pts to " + ps.level.nextName : "Top level" })])
     ]);
@@ -759,7 +766,7 @@ function renderPack() {
   const grid = el("div", { class: "badge-grid" });
   const drawBadges = () => {
     const ps = scoreOf(who.id); const have = new Set(ps ? ps.badges : []);
-    grid.replaceChildren(...C.badges.map((b) => el("div", { class: "badge" + (have.has(b.id) ? " on" : ""), title: b.how }, [el("span", { class: "be", text: b.e }), el("b", { text: b.nm }), el("small", { text: b.how })])));
+    grid.replaceChildren(...C.badges.map((b) => el("div", { class: "badge" + (have.has(b.id) ? " on" : ""), title: b.how }, [disc(b.icon || "star", BADGE_COLOUR[b.g] || "var(--accent)", "lg"), el("b", { text: b.nm }), el("small", { text: b.how })])));
   };
   const chips = el("div", { class: "chips" }, family().map((p) => el("button", { class: "chip" + (p.id === who.id ? " on" : ""), type: "button", text: p.name, onclick: (e) => { who = p; chips.querySelectorAll(".chip").forEach((c) => c.classList.toggle("on", c === e.target)); drawBadges(); } })));
   drawBadges();
@@ -796,8 +803,7 @@ function playVideo(id) {
   const closeBtn = el("button", { class: "player-close", type: "button", "aria-label": "Close video", text: "✕" });
   const box = el("div", { class: "player-box" + (shortV ? " short" : "") }, [
     el("div", { class: "player-frame" }, frame),
-    el("div", { class: "player-meta" }, [el("div", { style: "min-width:0" }, [el("b", { text: title }), el("small", { text: by })]),
-      el("a", { href: ytUrl(id, shortV), target: "_blank", rel: "noopener", text: "Open in YouTube" })])
+    el("div", { class: "player-meta" }, [el("div", { style: "min-width:0" }, [el("b", { text: title }), el("small", { text: by })])])
   ]);
   const ov = el("div", { class: "player", role: "dialog", "aria-modal": "true", "aria-label": title }, [closeBtn, box]);
   const close = () => { ov.remove(); document.removeEventListener("keydown", onKey); document.body.style.overflow = ""; if (before && before.focus) before.focus(); };
