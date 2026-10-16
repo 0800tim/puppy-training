@@ -192,7 +192,8 @@ async function safe(fn, okMsg) {
 /* ---------- navigation ---------- */
 const TABS = ["today", "skills", "pack", "help", "watch"];
 let current = "today";
-function show(tab) {
+function show(tab, push) {
+  if (push !== false && location.hash !== "#" + tab && S.settings) { try { history.pushState(null, "", "#" + tab); } catch (e) {} }
   document.querySelectorAll("section.panel").forEach((s) => (s.hidden = s.dataset.tab !== tab));
   const inApp = TABS.includes(tab);
   $("#tabs").hidden = !(inApp || (tab === "settings" && S.settings));
@@ -203,6 +204,14 @@ function show(tab) {
 document.querySelectorAll("nav.tabs button").forEach((b) => b.addEventListener("click", () => show(b.dataset.go)));
 $("#gear").addEventListener("click", () => { if (!S.settings) return; renderSettings(false); show("settings"); });
 $("#meChip").addEventListener("click", () => { if (S.settings) renderWho(); });
+window.addEventListener("popstate", () => {
+  if (!S.settings) return;
+  const h = (location.hash || "").slice(1);
+  if (TABS.includes(h)) show(h, false);
+  else if (h === "settings") { renderSettings(false); show("settings", false); }
+  else if (h === "who") renderWho(false);
+  else show("today", false);
+});
 
 /* ---------- avatars and small widgets ---------- */
 function avatar(p, size) {
@@ -276,14 +285,14 @@ function renderPin() {
 }
 
 /* ---------- who's this phone ---------- */
-function renderWho() {
+function renderWho(push) {
   const P = $("#p-who"); P.replaceChildren();
   P.append(el("div", { class: "card focus" }, [el("div", { class: "eyebrow", text: "Whose phone is this?" }), el("h2", { class: "h2", text: "Pick yourself" }),
     el("p", { class: "note", style: "margin-top:6px", text: "Your ticks, streak and badges go to you. Tap your name in the top bar any time to switch." })]));
   const grid = el("div", { class: "who-grid" });
   family().forEach((p) => grid.append(el("button", { class: "who", style: "--c:" + colorOf(p), onclick: () => { setMe(p.id); buzz(); renderHeader(); renderAll(); show(current); } }, [avatar(p, "lg"), el("b", { text: p.name }), el("small", { text: C.kinds[p.kind] ? C.kinds[p.kind].name : "" })])));
   P.append(grid);
-  show("who");
+  show("who", push);
 }
 
 /* ---------- settings / setup ---------- */
@@ -306,7 +315,7 @@ function resizeImage(file) {
 function renderSettings(firstRun) {
   const P = $("#p-settings"); P.replaceChildren();
   const st = S.settings || { puppy: { name: "", sex: "girl", breed: "", born: "" }, start: iso(today), family: [{ id: "p1", name: "", kind: "kid", target: 21, age: "" }] };
-  const fam = JSON.parse(JSON.stringify(st.family));
+  const fam = JSON.parse(JSON.stringify(st.family)).map((p) => { const kind = C.kinds[p.kind] ? p.kind : "kid"; return Object.assign({ age: "" }, p, { kind, target: Number(p.target) > 0 ? Number(p.target) : C.kinds[kind].target }); });
   const kindSel = (p) => el("select", { "aria-label": "Kid or grown-up", onchange: (e) => { p.kind = e.target.value; if (!p.touched) p.target = C.kinds[p.kind].target; drawFam(); } },
     Object.keys(C.kinds).map((k) => el("option", { value: k, selected: p.kind === k, text: C.kinds[k].name })));
   const ageSel = (p) => el("select", { "aria-label": "Age", onchange: (e) => (p.age = e.target.value) },
@@ -834,7 +843,11 @@ function renderWatch() {
 }
 
 /* ---------- render ---------- */
-function renderAll() { renderToday(); renderSkills(); renderPack(); }
+function renderAll() {
+  [["today", renderToday], ["skills", renderSkills], ["pack", renderPack]].forEach(([name, fn]) => {
+    try { fn(); } catch (e) { console.error(name, e); $("#p-" + name).replaceChildren(el("p", { class: "note", text: "This section hit a snag: " + (e && e.message) + ". Pull to refresh; if it stays, tell Tim." })); }
+  });
+}
 function onState() {
   const t = new Date(); t.setHours(0, 0, 0, 0); if (iso(t) !== iso(today)) { today = t; viewDay = new Date(today); }
   recompute();
@@ -858,7 +871,9 @@ async function boot2() {
     const r = await store.init(onState);
     if (r === "pin") renderPin();
   } catch (e) {
-    $("#p-loading").replaceChildren(el("p", { class: "note", text: "Couldn't reach the server. Check your connection and refresh." }));
+    console.error(e);
+    const net = !e || e.message === "server" || /fetch/i.test(String(e.message));
+    $("#p-loading").replaceChildren(el("p", { class: "note", text: net ? "Couldn't reach the server. Check your connection and refresh." : "Something went wrong loading the chart: " + e.message + ". Refresh; if it stays, tell Tim." }));
   }
 }
 (async function boot() {
