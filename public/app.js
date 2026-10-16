@@ -360,13 +360,45 @@ function renderToday() {
 }
 
 /* ---------- video link ---------- */
+/* Videos play inside the app (YouTube privacy-enhanced embed) everywhere except
+   inside a Claude artifact, where other sites can't be embedded, so they open in YouTube. */
+const canEmbed = () => !!store && store.mode !== "claude";
+const ytUrl = (id, shortV) => (shortV ? "https://www.youtube.com/shorts/" + id : "https://www.youtube.com/watch?v=" + id);
 function vidLink(id) {
   const v = C.videos[id]; if (!v) return null;
   const [title, by, min, kind] = v;
   const shortV = kind === "shorts";
-  const url = shortV ? "https://www.youtube.com/shorts/" + id : "https://www.youtube.com/watch?v=" + id;
-  const meta = by + (shortV ? " · 1-min short" : min ? " · " + min + " min" : "") + " · YouTube";
-  return el("a", { class: "vid" + (shortV ? " short" : ""), href: url, target: "_blank", rel: "noopener" }, [el("span", { class: "play", "aria-hidden": "true" }), el("span", { class: "txt" }, [el("b", { text: title }), el("small", { text: meta })])]);
+  const meta = by + (shortV ? " · 1-min short" : min ? " · " + min + " min" : "");
+  const txt = el("span", { class: "txt" }, [el("b", { text: title }), el("small", { text: meta + (canEmbed() ? "" : " · YouTube") })]);
+  if (!canEmbed()) {
+    return el("a", { class: "vid" + (shortV ? " short" : ""), href: ytUrl(id, shortV), target: "_blank", rel: "noopener" }, [el("span", { class: "play", "aria-hidden": "true" }), txt]);
+  }
+  const thumb = el("span", { class: "thumb" + (shortV ? " short" : ""), "aria-hidden": "true" }, [
+    el("img", { src: "https://i.ytimg.com/vi/" + id + "/mqdefault.jpg", alt: "", loading: "lazy", onerror: (e) => e.target.remove() }),
+    el("span", { class: "play" })]);
+  return el("button", { class: "vid", type: "button", "aria-label": "Play: " + title, onclick: () => playVideo(id) }, [thumb, txt]);
+}
+function playVideo(id) {
+  const [title, by, , kind] = C.videos[id];
+  const shortV = kind === "shorts";
+  const before = document.activeElement;
+  const src = "https://www.youtube-nocookie.com/embed/" + id + "?autoplay=1&rel=0&playsinline=1";
+  const frame = el("iframe", { src, title, allow: "autoplay; encrypted-media; picture-in-picture; fullscreen", allowfullscreen: true, referrerpolicy: "strict-origin-when-cross-origin" });
+  const closeBtn = el("button", { class: "player-close", type: "button", "aria-label": "Close video", text: "✕" });
+  const box = el("div", { class: "player-box" + (shortV ? " short" : "") }, [
+    el("div", { class: "player-frame" }, frame),
+    el("div", { class: "player-meta" }, [el("div", { style: "min-width:0" }, [el("b", { text: title }), el("small", { text: by })]),
+      el("a", { href: ytUrl(id, shortV), target: "_blank", rel: "noopener", text: "Open in YouTube" })])
+  ]);
+  const ov = el("div", { class: "player", role: "dialog", "aria-modal": "true", "aria-label": title }, [closeBtn, box]);
+  const close = () => { ov.remove(); document.removeEventListener("keydown", onKey); document.body.style.overflow = ""; if (before && before.focus) before.focus(); };
+  const onKey = (e) => { if (e.key === "Escape") close(); };
+  closeBtn.addEventListener("click", close);
+  ov.addEventListener("click", (e) => { if (e.target === ov) close(); });
+  document.addEventListener("keydown", onKey);
+  document.body.style.overflow = "hidden";
+  document.body.append(ov);
+  closeBtn.focus();
 }
 const vids = (ids) => (ids && ids.length ? el("div", { class: "vids" }, ids.map(vidLink)) : null);
 const list = (cls, title, items) => (items && items.length ? el("div", { class: cls }, [el("b", { text: title }), el("ul", {}, items.map((x) => el("li", { text: T(x) })))]) : null);
@@ -489,7 +521,7 @@ const STYLE = { reward: "Reward-based", mixed: "Mixed methods", aversive: "Uses 
 function renderWatch() {
   const P = $("#p-watch"); P.replaceChildren();
   P.append(el("div", { class: "card focus" }, [el("div", { class: "eyebrow", text: "Watch and read" }), el("h2", { class: "h2", text: "Bite-sized videos first" }),
-    el("p", { class: "note", style: "margin-top:6px", text: "Everything opens in YouTube. Every video in the app was checked when it was added." })]));
+    el("p", { class: "note", style: "margin-top:6px", text: (canEmbed() ? "Tap a video to play it right here." : "Videos open in YouTube.") + " Every video was checked when it was added. Some creators' videos show YouTube ads." })]));
   const shorts = Object.keys(C.videos).filter((id) => C.videos[id][3] === "shorts");
   P.append(el("div", { class: "eyebrow", text: "1-minute shorts (" + shorts.length + ")" }));
   P.append(el("details", { class: "acc" }, [el("summary", {}, el("div", { class: "nm" }, [el("h3", { text: "Quick wins" }), el("small", { text: "Biting, crates, zoomies, leave it, drop it…" })])), el("div", { class: "acc-body" }, vids(shorts))]));
@@ -532,5 +564,11 @@ async function boot2() {
     $("#p-loading").replaceChildren(el("p", { class: "note", text: "Couldn't reach the server. Check your connection and refresh." }));
   }
 }
-(async function boot() { store = await pickStore(); setSync(); boot2(); })();
+(async function boot() {
+  store = await pickStore(); setSync(); boot2();
+  // Installable app + offline shell when served from a real web server (not inside a Claude artifact).
+  if (store.mode !== "claude" && "serviceWorker" in navigator && /^https?:/.test(location.protocol)) {
+    try { navigator.serviceWorker.register("sw.js").catch(() => {}); } catch (e) {}
+  }
+})();
 })();

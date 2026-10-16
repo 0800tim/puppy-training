@@ -14,6 +14,9 @@ Made in New Zealand for a German Shorthaired Pointer × heading dog puppy who bi
 - **Help!**: an SOS card for "she's biting right now", 12 bite-sized biting topics, and 16 other problems (chewing, jumping, crying at night, toilet, guarding, herding nips, zoomies, barking, stealing, lead pulling, chasing cats, fear, vet handling, escaping, boredom).
 - **Watch**: starter playlists, every 1-minute short in one place, and the famous YouTube trainers (Kikopup, McCann, Zak George, Victoria Stilwell, Susan Garrett, Ian Dunbar, Cesar Millan and more), each labelled reward-based, mixed or uses corrections.
 
+- **Plays videos in the app.** Videos open in a built-in player (YouTube's privacy-enhanced embed) so kids don't end up on YouTube's home page. YouTube may still show ads on some creators' videos, which is how they get paid for free content.
+- **Installs like an app.** On a phone, use *Add to Home Screen*. It opens full screen and the app shell works offline.
+
 All the training content lives in one file: [`public/content.js`](public/content.js). Fork it and make it yours.
 
 ## Three ways to run it
@@ -36,7 +39,11 @@ Open `dist/puppy-school.html` on a phone or send it to someone. Ticks save on th
 
 ### 2. Static hosting
 
-Serve the `public/` folder from anywhere. For Google App Engine:
+Serve the `public/` folder from anywhere.
+
+**GitHub Pages (free, 2 minutes):** fork this repo, then go to *Settings → Pages → Deploy from a branch → `main` / `(root)`*. Your app will be at `https://YOUR-NAME.github.io/puppy-training/`.
+
+**Google App Engine:**
 
 ```bash
 gcloud app deploy --project YOUR_PROJECT
@@ -90,7 +97,7 @@ npm test     # server tests (node:test, no dependencies)
 npm run build
 ```
 
-- `public/` is the whole app: `index.html`, `styles.css`, `content.js` (all the training content), `app.js`.
+- `public/` is the whole app: `index.html`, `styles.css`, `content.js` (all the training content), `app.js`, `sw.js` (offline shell) and `manifest.webmanifest`.
 - `server/server.js` is the optional PIN server, one file, no dependencies.
 
 Contributions welcome, especially new skills, better videos, translations and fixes to `content.js`. Please keep the training advice reward-based.
