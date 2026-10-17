@@ -36,7 +36,7 @@
   --shadow:0 1px 0 rgba(255,255,255,.03),0 6px 20px rgba(0,0,0,.35); --glow:0 12px 32px rgba(91,75,240,.28); color-scheme:dark }
 
 *{box-sizing:border-box}
-html{-webkit-text-size-adjust:100%}
+html{-webkit-text-size-adjust:100%;scroll-padding-bottom:120px}
 body{margin:0;overflow-x:clip;background:var(--bg);color:var(--ink);font-family:var(--font-body);font-size:16px;line-height:1.5;-webkit-font-smoothing:antialiased}
 body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--surface)}
 a{color:var(--accent)}
@@ -65,7 +65,7 @@ header.top .wrap{display:flex;align-items:center;gap:12px;padding-block:12px}
 .gear{width:40px;height:40px;border-radius:50%;border:0;background:var(--sunk);color:var(--ink);display:grid;place-items:center;cursor:pointer;flex:none}
 .gear svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 
-main{padding-block:16px 110px}
+main{padding-block:16px calc(110px + env(safe-area-inset-bottom,0px))}
 .panel{display:grid;gap:14px}
 .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:18px;box-shadow:var(--shadow)}
 .card.focus{background:var(--brand-soft);border-color:transparent}
@@ -108,6 +108,7 @@ main{padding-block:16px 110px}
 .pill.good{background:var(--good-soft);color:var(--good)}
 .pill.warm{background:var(--sun-soft);color:var(--warn)}
 .pill.open{background:var(--brand-soft);color:var(--brand)}
+.pill .ic{width:12px;height:12px;vertical-align:-2px;margin-right:3px}
 .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .linkbtn{border:0;background:none;color:var(--accent);font-weight:700;cursor:pointer;padding:6px 10px;min-height:32px;border-radius:8px}
 .iconbtn{width:40px;height:40px;border-radius:50%;border:1px solid var(--line);background:var(--surface);color:var(--ink);font-size:1.3rem;cursor:pointer}

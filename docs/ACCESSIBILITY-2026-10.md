@@ -30,9 +30,14 @@ Scope: `public/index.html`, `public/app.js`, `public/styles.css` after design pa
 
 ## Still open
 
-- **The floating tab bar** overlaps the last 90px of content; `main` has bottom padding to compensate, but a very tall font setting can still hide the last row of the week table under it. A `scroll-padding-bottom` and testing at 200 percent zoom are worth a follow-up.
 - **The bite meter emoji** differ per platform (Samsung's shark is not Apple's). Hand-drawn dog faces would fix both the consistency and the reader-naming issue at the root; the labels fix the latter now.
 - **Colour alone** signals a person on rings and ticked slots. The slot text ("Morning, done") and the ring label carry the same information, so this passes, but a pattern or initial inside the ring would help colour-blind kids spot their own row faster.
-- **Skill pills** ("Open", "Locked", "2/3") rely on colour plus short text; fine, but the lock icon is text ("🔒"), which reads as "locked face" on some readers. Replace with the sprite lock in a follow-up.
-- **Haptics** (`navigator.vibrate`) cannot be turned off separately from the phone's own setting. A per-phone toggle in Settings is cheap.
 - **Automated checks**: no axe run yet. A headless axe-core pass on each tab in both themes would catch regressions; the Playwright harness in the scratchpad is the place to add it.
+
+## Follow-ups done on `burn/a11y-followups`, 17 October 2026
+
+- **Tab bar and the last row**: `html` now has `scroll-padding-bottom: 120px`, so anything scrolled into view by focus or an anchor lands above the floating tab bar, and `main`'s bottom padding adds the safe-area inset so the bar's own offset on notched phones is covered. Check at 200 percent zoom on the Pack week table: the last row should sit clear of the bar when it has focus.
+- **Skill pills**: the locked pill uses the sprite lock (`aria-hidden`, 12px) with the word "Locked", so screen readers say "Locked" and nothing else.
+- **Haptics**: Settings, "This phone", has a checkbox "Buzz for first badges and level-ups on this phone". It is stored per phone in `localStorage` as `pt.haptics`; `buzz()` checks it before `navigator.vibrate`. Default on. Ticking it on gives one short buzz so the person knows it works.
+- Version bumped to `pt-v15` (the three feature branches are also at `pt-v15`; identical bumps merge silently, see `docs/MERGE-REVIEW-2026-10-17.md`).
+- Checks added to `scripts/smoke-static.py` for the haptics switch and the lock sprite. Not run on clawdia (memory rule); run on bigmac with the commands at the top of that script.
