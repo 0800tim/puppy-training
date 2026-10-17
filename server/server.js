@@ -118,7 +118,7 @@ function createApp(opts = {}) {
 
   /* ---------- store ---------- */
   const storeFile = path.join(dataDir, "store.json");
-  let db = { rev: 1, settings: null, ticks: {}, logs: {}, mastery: {}, toilet: [], push: [], sent: null, social: {} };
+  let db = { rev: 1, settings: null, ticks: {}, logs: {}, mastery: {}, toilet: [], push: [], sent: null, social: {}, share: null };
   if (fs.existsSync(storeFile)) { try { db = Object.assign(db, JSON.parse(fs.readFileSync(storeFile, "utf8"))); } catch (e) { log("store.json unreadable, starting fresh:", e.message); } }
   function persist(bump = true) {
     if (bump) db.rev++;
@@ -128,7 +128,7 @@ function createApp(opts = {}) {
   }
   const photoFile = path.join(dataDir, "photo.jpg");
   const stateOut = () => ({ rev: db.rev, settings: db.settings, ticks: db.ticks, logs: db.logs, mastery: db.mastery, toilet: db.toilet.slice(-300), social: db.social || {}, photo: fs.existsSync(photoFile), today: localToday(),
-    push: (db.push || []).map((s) => ({ id: s.id, pid: s.pid, prefs: s.prefs || {}, created: s.created, label: s.label || "" })), sms: !!smsSender, vapid: vapid.publicKey });
+    push: (db.push || []).map((s) => ({ id: s.id, pid: s.pid, prefs: s.prefs || {}, created: s.created, label: s.label || "" })), sms: !!smsSender, vapid: vapid.publicKey, share: db.share ? { token: db.share.token, created: db.share.created } : null });
   /* ---------- push keys, notifier ---------- */
   const vapidFile = path.join(dataDir, "vapid.json");
   let vapid;
@@ -156,6 +156,25 @@ function createApp(opts = {}) {
       start: DATE_RE.test(x.start) ? x.start : new Date().toISOString().slice(0, 10),
       family
     };
+  }
+
+  /* ---------- the visitor card: one page for grandparents and sitters, no PIN, by link only ---------- */
+  const esc = (x) => String(x).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  function visitorHtml(st) {
+    const name = st ? esc(st.puppy.name || "the puppy") : "";
+    const she = st && st.puppy.sex === "boy" ? "he" : "she";
+    const T = (x) => esc(st && st.puppy.sex === "boy" ? String(x).replace(/\bshe\b/g, "he").replace(/\bShe\b/g, "He").replace(/\bher\b/g, "him") : x);
+    const li = (arr) => arr.map((x) => "<li>" + T(x) + "</li>").join("");
+    const body = !st ? "<h1>No card here</h1><p>This link has been turned off. Ask the family for a new one.</p>" :
+      "<h1>Looking after " + name + "</h1><p class=\"lead\">Thanks for helping. " + (name) + " is a puppy in training. The family use these exact words and these few rules, and it works best when everyone does. Nothing here is hard.</p>" +
+      "<h2>Say it once, the same way</h2><table>" + CONTENT.cues.map(([a, b]) => "<tr><th>" + esc(a) + "</th><td>" + T(b) + "</td></tr>").join("") + "</table>" +
+      "<h2>If " + she + " bites</h2><ol>" + li(CONTENT.sos.steps) + "</ol>" +
+      "<h2>House rules</h2><ul>" + li(CONTENT.rules) + "</ul>" +
+      "<h2>Kids and " + name + "</h2><ul>" + li(CONTENT.kids.rules) + "</ul>" +
+      "<h2>Never give</h2><p>" + esc(CONTENT.treats.never) + "</p>" +
+      "<p class=\"foot\">Made with Puppy School HQ, free and open source. This page is private to people with the link.</p>";
+    return "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"robots\" content=\"noindex\"><title>" + (st ? "Looking after " + name : "Puppy School HQ") + "</title>" +
+      "<style>body{margin:0;background:#f4f3fa;color:#1c1a33;font:17px/1.55 system-ui,-apple-system,'Segoe UI',sans-serif}main{max-width:640px;margin:0 auto;padding:28px 18px 60px}h1{font-size:1.9rem;line-height:1.1;margin:0 0 10px}h2{font-size:1.1rem;margin:28px 0 8px;color:#5b4bf0;text-transform:uppercase;letter-spacing:.06em}.lead{font-size:1.05rem;color:#4a476a}table{width:100%;border-collapse:collapse;background:#fff;border-radius:14px;overflow:hidden}th,td{text-align:left;padding:10px 12px;border-bottom:1px solid #e3e1ee;vertical-align:top}th{white-space:nowrap;width:1%}ul,ol{padding-left:20px}li{margin:6px 0}.foot{margin-top:40px;color:#6e6b8a;font-size:.85rem}@media(prefers-color-scheme:dark){body{background:#131225;color:#ededf7}table{background:#1d1b33}th,td{border-color:rgba(255,255,255,.08)}.lead{color:#c9c6e4}h2{color:#8b7cff}.foot{color:#9d9bbd}}</style></head><body><main>" + body + "</main></body></html>";
   }
 
   /* ---------- http helpers ---------- */
@@ -194,11 +213,17 @@ function createApp(opts = {}) {
   async function handle(req, res) {
     const u = new URL(req.url, "http://x");
     const p = u.pathname;
+    let m;
     if (!p.startsWith("/api/")) {
       if (req.method !== "GET" && req.method !== "HEAD") return send(res, 405, "Method not allowed");
       return serveStatic(req, res, p);
     }
     if (p === "/api/health") return send(res, 200, { app: "puppy-training", version: VERSION, pin: true });
+    if ((m = p.match(/^\/api\/visitor\/([a-f0-9]{24})$/)) && req.method === "GET") {
+      const tok = Buffer.from(m[1]), real = Buffer.from(db.share ? db.share.token : "x".repeat(24));
+      if (!db.settings || tok.length !== real.length || !crypto.timingSafeEqual(tok, real)) return send(res, 404, visitorHtml(null), { "Content-Type": "text/html; charset=utf-8" });
+      return send(res, 200, visitorHtml(db.settings), { "Content-Type": "text/html; charset=utf-8" });
+    }
 
     if (p === "/api/login" && req.method === "POST") {
       const ip = clientIp(req);
@@ -249,7 +274,6 @@ function createApp(opts = {}) {
       if (!s) return send(res, 400, { error: "Need at least one family member" });
       db.settings = s; persist(); return send(res, 200, out());
     }
-    let m;
     if ((m = p.match(/^\/api\/ticks\/([^/]+)$/)) && req.method === "PUT") {
       const key = decodeURIComponent(m[1]);
       if (!TICK_RE.test(key)) return send(res, 400, { error: "Bad tick" });
@@ -358,6 +382,16 @@ function createApp(opts = {}) {
       const pup = (db.settings && db.settings.puppy.name) || "Your puppy";
       try { await smsSender(to.phone, pup + " here. Texts are on for " + to.name + ". I'll text once a day at most, only if nothing is on the chart. puppy.appspurt.com"); return send(res, 200, { ok: true }); }
       catch (e) { return send(res, 502, { error: "SMS failed: " + e.message }); }
+    }
+    if (p === "/api/share" && req.method === "POST") {
+      if (!isAdult) return send(res, 403, { error: "Grown-ups only" });
+      db.share = { token: crypto.randomBytes(12).toString("hex"), created: now() };
+      log("visitor link created", me.id);
+      persist(); return send(res, 200, out());
+    }
+    if (p === "/api/share" && req.method === "DELETE") {
+      if (!isAdult) return send(res, 403, { error: "Grown-ups only" });
+      db.share = null; persist(); return send(res, 200, out());
     }
     if (p === "/api/photo") {
       if (req.method === "GET") {

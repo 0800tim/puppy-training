@@ -140,7 +140,7 @@ class ServerStore {
     this.rev = j.rev;
     S.settings = j.settings || null;
     S.ticks = j.ticks || {}; S.logs = j.logs || {}; S.mastery = j.mastery || {}; S.toilet = j.toilet || [];
-    S.push = j.push || []; S.sms = !!j.sms; S.vapid = j.vapid || ""; S.social = j.social || {}; S.adultPin = !!j.adultPin;
+    S.push = j.push || []; S.sms = !!j.sms; S.vapid = j.vapid || ""; S.social = j.social || {}; S.adultPin = !!j.adultPin; S.share = j.share || null;
     if ("me" in j) { S.me = j.me; if (j.me && j.me !== meId) { meId = j.me; lsSet("pt.me", j.me); } }
     if (j.photo !== S.photo) { S.photo = !!j.photo; this.photoBust = Date.now(); }
     this.cb();
@@ -187,6 +187,8 @@ class ServerStore {
   async setLog(date, v) { if (v.bite) S.logs[date] = v; else delete S.logs[date]; this.cb(); return this.write("PUT", "api/logs/" + date, v); }
   setMastery(skill, by, witness, on) { return this.write("PUT", "api/mastery/" + skill, { by, witness, on }); }
   setSocial(item, by, mood, on) { return this.write("PUT", "api/social/" + item, { by, mood, on }); }
+  makeShare() { return this.write("POST", "api/share", {}); }
+  dropShare() { return this.write("DELETE", "api/share"); }
   addToilet(x) { return this.write("POST", "api/toilet", x); }
   voidToilet(id) { return this.write("DELETE", "api/toilet/" + id); }
   setPhoto(data) { return data ? this.write("PUT", "api/photo", { data }) : this.write("DELETE", "api/photo"); }
@@ -485,7 +487,26 @@ function renderSettings(firstRun) {
       el("p", { class: "note", text: store.mode === "server" ? "Ticks sync to everyone who has the family PIN. Changing the PIN on the server signs every phone out." : "Ticks are saved on this phone only. To share one chart with the whole family, self-host it with a family PIN (see the project README)." })]);
     P.append(el("div", { class: "eyebrow", text: "This phone" }), info);
     P.append(el("div", { class: "eyebrow", text: "Reminders" }), renderNotifCard());
+    if (isAdult(me())) P.append(el("div", { class: "eyebrow", text: "Visitor card" }), renderShareCard());
   }
+}
+
+/* ---------- the visitor card: a link for grandparents and sitters ---------- */
+function renderShareCard() {
+  const card = el("div", { class: "card", style: "display:grid;gap:10px" });
+  const url = S.share ? location.origin + "/api/visitor/" + S.share.token : null;
+  card.append(el("p", { class: "note", text: "One page with the cue words, the biting steps, the house rules and the kids' rules, for anyone minding " + pupName() + ". No PIN, no family names, no chart. Anyone with the link can read it; make a new link to cut off the old one." }));
+  if (url) {
+    card.append(el("input", { type: "text", readonly: true, value: url, "aria-label": "Visitor card link", onclick: (e) => e.target.select() }),
+      el("div", { class: "row" }, [
+        el("button", { class: "btn", type: "button", text: navigator.share ? "Share link" : "Copy link", onclick: async () => {
+          try { if (navigator.share) await navigator.share({ title: "Looking after " + pupName(), url }); else { await navigator.clipboard.writeText(url); toast("Copied"); } } catch (e) {}
+        } }),
+        el("a", { class: "btn ghost", href: url, target: "_blank", rel: "noopener", text: "Preview" }),
+        el("button", { class: "btn ghost", type: "button", text: "New link", onclick: () => safe(() => store.makeShare(), "New link made; the old one is dead") }),
+        el("button", { class: "btn ghost", type: "button", text: "Turn off", onclick: () => safe(() => store.dropShare(), "Visitor card off") })]));
+  } else card.append(el("button", { class: "btn", type: "button", text: "Make a visitor link", onclick: () => safe(() => store.makeShare(), "Link made") }));
+  return card;
 }
 
 /* ---------- reminders (web push per phone, SMS per person) ---------- */
@@ -610,6 +631,7 @@ function renderToday() {
     el("button", { class: "iconbtn", "aria-label": "Next day", text: "›", disabled: isToday, onclick: () => { if (viewDay < today) { viewDay = addDays(viewDay, 1); renderToday(); } } })
   ]));
   if (viewDay < today && !isAdult(m)) P.append(el("p", { class: "note", text: "Past days can only be changed by a grown-up." }));
+  if (isToday) P.append(cueStrip());
 
   // my missions
   if (m && isToday) {
@@ -700,6 +722,13 @@ function renderToilet(P, sc, m) {
   const worst = Object.entries(tl.accidentsAfter).sort((a, b) => b[1] - a[1])[0];
   if (worst && worst[1] >= 2) card.append(el("p", { class: "note", text: "Pattern: most accidents happen " + (C.toiletBefore.find((b) => b[0] === worst[0]) || ["", ""])[1].toLowerCase() + ". Take " + T("her") + " out straight after that." }));
   P.append(card);
+}
+
+/* ---------- the cue sheet, pinned ---------- */
+function cueStrip() {
+  const strip = el("div", { class: "cues", role: "list", "aria-label": "Cue words everyone uses" });
+  C.cues.forEach(([word, means]) => strip.append(el("button", { class: "cue", role: "listitem", type: "button", title: T(means), "aria-label": word + ": " + T(means), onclick: () => openAcc("cue-sheet", "skills") }, [el("b", { text: word }), el("small", { text: T(means).split(/[.,:]/)[0] })])));
+  return el("div", { class: "cuewrap" }, [el("div", { class: "row", style: "justify-content:space-between;margin-bottom:6px" }, [el("div", { class: "eyebrow", text: "Same words, everyone" }), el("button", { class: "linkbtn", type: "button", text: "Full sheet", onclick: () => openAcc("cue-sheet", "skills") })]), strip]);
 }
 
 /* ---------- celebrations ---------- */
@@ -933,8 +962,9 @@ function renderSkills() {
     el("p", { class: "note", style: "margin-top:8px", text: T("Short sessions beat long ones. If she starts biting, zooming or ignoring you, she's tired: stop, toilet break, nap.") })]));
   P.append(el("div", { class: "callout" }, [el("b", { text: "Puppy preschool: book early" }), el("p", { text: T(C.preschool) })]));
   P.append(el("div", { class: "eyebrow", text: "Same words, everyone" }));
-  P.append(el("div", { class: "card" }, [el("p", { class: "note", style: "margin-bottom:8px", text: T("She learns fastest when everyone says exactly the same thing. Say a cue once. If she doesn't do it, make it easier rather than repeating louder.") }),
-    el("table", { class: "cue-tbl" }, C.cues.map(([a, b]) => el("tr", {}, [el("td", { text: a }), el("td", { text: b })])))]));
+  P.append(el("details", { class: "acc", id: "cue-sheet", open: true }, [el("summary", {}, el("div", { class: "nm" }, [el("h3", { text: "The cue sheet" }), el("small", { text: "One word per behaviour. Say it once." })])),
+    el("div", { class: "acc-body" }, [el("p", { class: "note", text: T("She learns fastest when everyone says exactly the same thing. Say a cue once. If she doesn't do it, make it easier rather than repeating louder.") }),
+      el("table", { class: "cue-tbl" }, C.cues.map(([a, b]) => el("tr", {}, [el("td", { text: a }), el("td", { text: T(b) })])))])]));
   P.append(el("div", { class: "eyebrow", text: "Treats" }));
   P.append(el("div", { class: "card focus" }, [el("h2", { class: "h2", text: "Pea-sized, soft and smelly" }), el("p", { class: "note", style: "margin-top:6px", text: T(C.treats.intro) })]));
   P.append(el("div", { class: "ladder" }, C.treats.ladder.map((x) => el("div", { class: "rung " + x.c }, [el("div", { class: "lvl", text: x.l }), el("div", {}, [el("b", { text: x.t }), el("p", { text: T(x.d) })])]))));
@@ -1075,6 +1105,7 @@ function onState() {
   const key = JSON.stringify(S.settings);
   if (key !== staticKey) { staticKey = key; renderHelp(); renderWatch(); }
   renderAll();
+  if (!$("#p-settings").hidden && S.settings) renderSettings(false);
   if (!$("#p-loading").hidden || !$("#p-pin").hidden) {
     let start = "today";
     const h = (location.hash || "").slice(1);

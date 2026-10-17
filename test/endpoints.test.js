@@ -121,3 +121,26 @@ test("decide() is what the scheduler calls: same inputs, same message", () => {
   const out = N.decide(new Date("2026-10-19T07:00:00"), state, sc, [{ id: "s", pid: "k", channel: "push", prefs: {} }], C, {});
   assert.equal(out.length, 1); assert.equal(out[0].kind, "am");
 });
+
+test("visitor card: grown-ups make and revoke a link; the page is public by link only and never indexed", async () => {
+  const app = await boot();
+  try {
+    const kid = await app.as("k"), mum = await app.as("a");
+    assert.equal((await app.call("POST", "/api/share", {}, kid)).status, 403);
+    const made = await app.call("POST", "/api/share", {}, mum);
+    assert.equal(made.status, 200); assert.match(made.json.share.token, /^[a-f0-9]{24}$/);
+    const base = "http://127.0.0.1:" + app.server.address().port;
+    const page = await fetch(base + "/api/visitor/" + made.json.share.token);
+    assert.equal(page.status, 200);
+    const html = await page.text();
+    assert.match(html, /Looking after Pip/); assert.match(html, /noindex/); assert.match(html, /Say it once/);
+    assert.ok(!/Kid<|Mum</.test(html), "no family names on the card");
+    assert.equal((await fetch(base + "/api/visitor/" + "0".repeat(24))).status, 404);
+    const again = await app.call("POST", "/api/share", {}, mum);
+    assert.notEqual(again.json.share.token, made.json.share.token, "a new link replaces the old one");
+    assert.equal((await fetch(base + "/api/visitor/" + made.json.share.token)).status, 404, "old link dead");
+    assert.equal((await app.call("DELETE", "/api/share", undefined, kid)).status, 403);
+    await app.call("DELETE", "/api/share", undefined, mum);
+    assert.equal((await fetch(base + "/api/visitor/" + again.json.share.token)).status, 404, "revoked");
+  } finally { app.stop(); }
+});
