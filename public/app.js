@@ -497,10 +497,8 @@ function renderSettings(firstRun) {
       el("div", { class: "field" }, [el("label", { text: "Whose phone is this?" }), whoSel]),
       el("div", { class: "field" }, [el("label", { text: "Appearance" }), seg]),
       el("div", { class: "row" }, [
-        el("button", { class: "btn ghost", type: "button", text: "Export the chart (JSON)", onclick: () => {
-          const blob = new Blob([JSON.stringify(store.exportJson(), null, 2)], { type: "application/json" });
-          const a = el("a", { href: URL.createObjectURL(blob), download: "puppy-school-" + iso(today) + ".json" }); document.body.append(a); a.click(); a.remove();
-        } }),
+        el("button", { class: "btn ghost", type: "button", text: "Export JSON", onclick: () => downloadFile("puppy-school-" + iso(today) + ".json", JSON.stringify(store.exportJson(), null, 2), "application/json") }),
+        el("button", { class: "btn ghost", type: "button", text: "Export CSV", onclick: () => downloadFile("puppy-school-" + iso(today) + ".csv", exportCsv(), "text/csv") }),
         store.mode === "server" ? el("button", { class: "btn ghost", type: "button", text: "Lock this phone", onclick: () => store.logout() }) : null]),
       el("p", { class: "note", text: store.mode === "server" ? "Ticks sync to everyone who has the family PIN. Changing the PIN on the server signs every phone out." : "Ticks are saved on this phone only. To share one chart with the whole family, self-host it with a family PIN (see the project README)." })]);
     P.append(el("div", { class: "eyebrow", text: "This phone" }), info);
@@ -749,6 +747,56 @@ function renderToilet(P, sc, m) {
   P.append(card);
 }
 
+/* ---------- export ---------- */
+function downloadFile(name, text, type) {
+  const blob = new Blob([text], { type: type + ";charset=utf-8" });
+  const a = el("a", { href: URL.createObjectURL(blob), download: name }); document.body.append(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+}
+// One flat file a spreadsheet opens cleanly: every entry in the chart as a row.
+function exportCsv() {
+  // Quoted, and a cell that starts with = + - @ or a tab gets a leading apostrophe so Excel and Sheets read it as text, not a formula.
+  const q = (v) => { let s = String(v == null ? "" : v); if (/^[=+\-@\t\r]/.test(s)) s = "'" + s; return '"' + s.replace(/"/g, '""') + '"'; };
+  const who = (id) => (person(id) ? person(id).name : id || "");
+  const when = (ms) => (ms ? new Date(ms).toISOString() : "");
+  const rows = [["type", "date", "person", "detail", "value", "logged_by", "logged_at"]];
+  Object.keys(S.ticks).sort().forEach((k) => { const t = S.ticks[k]; if (!t || t.void) return; const [date, pid, slot] = k.split("_"); const sk = t.skill && skillById(t.skill); rows.push(["session", date, who(pid), (C.slots.find((x) => x.id === slot) || { t: slot }).t, sk ? sk.nm : "", who(t.by), when(t.at)]); });
+  Object.keys(S.logs).sort().forEach((d) => { const l = S.logs[d]; if (l && l.bite) rows.push(["bite_meter", d, "", BITE[l.bite - 1][1], l.bite, who(l.by), ""]); });
+  (S.toilet || []).filter((t) => !t.void).forEach((t) => rows.push(["toilet", iso(new Date(t.at)), "", t.kind, (C.toiletBefore.find((b) => b[0] === t.before) || ["", ""])[1], who(t.by), when(t.at)]));
+  C.skills.forEach((sk) => { const v = ((S.mastery[sk.id] || {}).done || []).filter((x) => !x.void); v.forEach((x) => rows.push(["skill_confirmed", iso(new Date(x.at)), who(x.by), sk.nm, "witness: " + who(x.witness), who(x.by), when(x.at)])); });
+  Object.keys(S.social || {}).forEach((key) => { const [g, i] = key.split(":"); const grp = C.socialGroups.find((x) => x.id === g); const item = grp && grp.items[Number(i)]; (S.social[key] || []).filter((x) => !x.void).forEach((x) => rows.push(["socialising", iso(new Date(x.at)), who(x.by), item || key, x.mood, who(x.by), when(x.at)])); });
+  (S.health || []).forEach((h) => rows.push(["health", h.date, "", h.kind, h.kg != null ? h.kg : h.note || "", who(h.by), when(h.at)]));
+  return rows.map((r) => r.map(q).join(",")).join("\r\n") + "\r\n";
+}
+
+/* ---------- certificate: one page to print or save as PDF ---------- */
+function showCertificate() {
+  const sc = S.scores; if (!sc) return;
+  const pl = sc.puppy.level;
+  const names = family().map((p) => p.name);
+  const when = today.toLocaleDateString("en-NZ", { day: "numeric", month: "long", year: "numeric" });
+  const before = document.activeElement;
+  const sheet = el("div", { class: "cert-sheet" }, [
+    el("div", { class: "cert-frame" }, [
+      el("div", { class: "cert-paw" }, icon("paw")),
+      el("div", { class: "cert-kicker", text: "Puppy School HQ certifies that" }),
+      el("h1", { class: "cert-name", text: pupName() }),
+      el("div", { class: "cert-reached", text: "has reached level " + pl.n + " of " + C.puppyLevels.length }),
+      el("h2", { class: "cert-level", text: pl.name }),
+      el("p", { class: "cert-stats", text: sc.puppy.sessions + " training sessions · " + sc.puppy.mastered + " of " + sc.puppy.total + " skills mastered · " + sc.calmDays + " calm days" }),
+      el("p", { class: "cert-family", text: "Trained with love by " + (names.length > 1 ? names.slice(0, -1).join(", ") + " and " + names[names.length - 1] : names[0] || "the family") }),
+      el("p", { class: "cert-date", text: when }),
+      el("div", { class: "cert-foot", text: "Reward-based training, 5 minutes, 3 times a day. puppy-training on GitHub." })
+    ])
+  ]);
+  const ov = el("div", { class: "cert", role: "dialog", "aria-modal": "true", "aria-label": "Certificate" }, [
+    el("div", { class: "row cert-bar" }, [el("button", { class: "btn", type: "button", text: "Print or save as PDF", onclick: () => window.print() }), el("button", { class: "btn ghost", type: "button", text: "Close", onclick: () => close() })]),
+    sheet]);
+  const close = () => { ov.remove(); document.body.classList.remove("printing-cert"); document.removeEventListener("keydown", onKey); if (before && before.focus) before.focus(); };
+  const onKey = (e) => { if (e.key === "Escape") close(); };
+  document.addEventListener("keydown", onKey);
+  document.body.classList.add("printing-cert"); document.body.append(ov); ov.querySelector("button").focus();
+}
+
 /* ---------- the cue sheet, pinned ---------- */
 function cueStrip() {
   const strip = el("div", { class: "cues", role: "list", "aria-label": "Cue words everyone uses" });
@@ -796,6 +844,7 @@ function renderPack() {
   const sc = S.scores; if (!sc) return;
   const m = me();
   P.append(el("div", { class: "card focus" }, [el("div", { class: "eyebrow", text: "The pack" }), el("h2", { class: "h2", text: "Everyone trains, " + pupName() + " wins" }),
+    el("div", { class: "row", style: "margin-top:10px" }, [el("button", { class: "btn ghost", type: "button", text: "Print " + pupName() + "'s certificate", onclick: showCertificate })]),
     el("p", { class: "note", style: "margin-top:6px", text: "Points for showing up, streaks with two free passes a week, badges for the good stuff. The podium ranks by percent of your own weekly goal, so a kid on 21 and a grown-up on 10 race fairly, and it resets every Sunday." })]));
   // pack streak + week
   P.append(el("div", { class: "card" }, [

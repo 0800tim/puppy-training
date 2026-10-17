@@ -56,7 +56,7 @@ And the loudest complaint about all of them is billing and lock-in. So this one 
 - Light and dark mode, following the phone or set in Settings.
 - The puppy's photo in the corner.
 - Confetti and a buzz for a first badge or a level up, never for a routine tick.
-- Export the whole chart as JSON any time.
+- Export the whole chart as JSON or CSV any time, and print a certificate for the puppy's current level.
 - Reminders per phone, and optional daily texts.
 
 All the training content lives in one file: [`public/content.js`](public/content.js). The rewards engine is one file too: [`public/rewards.js`](public/rewards.js). Fork it and make it yours.
@@ -167,7 +167,6 @@ Contributions welcome, especially new skills, better videos, translations, breed
 
 ## Roadmap
 
-- CSV export and a printable certificate per puppy level.
 - Multi-family hosting so any family can sign up with their own PIN.
 
 ## A note on training methods
