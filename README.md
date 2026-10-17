@@ -57,6 +57,7 @@ And the loudest complaint about all of them is billing and lock-in. So this one 
 - The puppy's photo in the corner.
 - Confetti and a buzz for a first badge or a level up, never for a routine tick.
 - Export the whole chart as JSON any time.
+- Reminders per phone, and optional daily texts.
 
 All the training content lives in one file: [`public/content.js`](public/content.js). The rewards engine is one file too: [`public/rewards.js`](public/rewards.js). Fork it and make it yours.
 
@@ -145,14 +146,25 @@ npm run build
 
 Contributions welcome, especially new skills, better videos, translations, breed notes and fixes to `content.js`. Please keep the training advice reward-based.
 
+**Reminders**
+- Each phone can turn on reminders: a nudge before school, one after school, one in the evening, and a streak-saver at 8pm, only when that slot is empty. Two a day at most, silent during school hours and at night, and they pause themselves after six ignored nudges. Grown-ups can see and pause every phone.
+- Optional daily text through an SMS gateway for anyone with a number saved, one a day, only if nothing is on the chart.
+
+**Kids and the puppy** (on Help): the seven safety rules, the Pat-Pet-Pause consent test, Be a Tree, a green/amber/red body-language game, and what each age can do.
+
+**Socialising, the first year, and the breed**
+- A 60-item socialisation checklist in seven groups with "happy, unsure or scared" on each; whoever was there gets the points.
+- The first year as a dated timeline from the puppy's birthday: the fear period, trade games, vaccinations, teething, the soft-mouth deadline, adolescence, desexing as a vet decision.
+- Breed notes matched on the breed field: gundog, herding, terrier and companion traits and what they mean for training.
+
+**Weekly challenges**: nine puppy-voiced family challenges rotate, one a week; the whole family gets the points when one is won.
+
 ## Roadmap
 
-- Push notifications per phone (school-aware windows, two a day at most, quiet hours, a "reminders are having a rest" exit) and optional SMS.
-- A kids-and-dogs safety module: the Pat-Pet-Pause consent test, Be a Tree, a traffic-light body-language game, tasks by age.
-- Weekly challenges, buddy streaks and co-signed "I taught my brother Sit".
-- A dated development timeline keyed to the puppy's birthday: fear periods, teething, vaccinations, the adolescent dip.
-- Socialisation counters, weight on a growth curve, vaccine and worming dates.
+- Buddy streaks between two people and co-signed "I taught my brother Sit".
+- Weight on a growth curve, vaccine and worming dates.
 - A pinned cue sheet and a shareable visitor card for grandparents and sitters.
+- CSV export and a printable certificate per puppy level.
 - Multi-family hosting so any family can sign up with their own PIN.
 
 ## A note on training methods
