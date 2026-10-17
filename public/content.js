@@ -405,7 +405,7 @@ const PUPPY_CONTENT = {
   /* ---------- rewards: levels, badges, points (see docs/REWARDS.md) ---------- */
   kinds: { kid: { name: "Kid", target: 21 }, adult: { name: "Grown-up", target: 10 } },
   slotWindows: { am: [5.5, 12], pm: [12, 17.5], ev: [17.5, 22] },
-  points: { session: 10, sessionOther: 8, fullDay: 5, mastery: 30, witness: 10, bite: 2, toilet: 2, toiletCap: 10, packDay: 5, social: 5 },
+  points: { session: 10, sessionOther: 8, fullDay: 5, mastery: 30, witness: 10, bite: 2, toilet: 2, toiletCap: 10, packDay: 5, social: 5, teach: 15, learn: 10 },
   puppyPoints: { session: 10, mastery: 50, calmDay: 20, packDay: 10, toilet: 2, toiletCap: 10, social: 10 },
   levels: [["New Recruit", 0], ["Treat Pocket", 50], ["Clicker Cadet", 150], ["Sit Specialist", 300], ["Lead Hand", 500], ["Bite Buster", 800], ["Recall Ranger", 1200], ["Pack Captain", 1700], ["Top Dog Trainer", 2400], ["Puppy School Principal", 3500]],
   puppyLevels: [["Land Shark", 0], ["Treat Seeker", 100], ["Name Knower", 250], ["Sitter", 450], ["Settler", 700], ["Good Walker", 1000], ["Recall Rookie", 1400], ["Soft Mouth", 1900], ["Clever Clogs", 2500], ["Good Dog Graduate", 3200]],
@@ -439,6 +439,9 @@ const PUPPY_CONTENT = {
     { id: "dryday", g: "Toilet", e: "☀️", icon: "sun", nm: "Dry Day", how: "A day with outside trips and no accidents. Whole pack badge.", pack: true },
     { id: "social10", g: "Socialising", e: "🌏", icon: "globe", nm: "Out and About", how: "Ten socialisation items ticked happy." },
     { id: "social40", g: "Socialising", e: "🦋", icon: "globe", nm: "Social Butterfly", how: "Forty socialisation items ticked happy. Whole pack badge.", pack: true },
+    { id: "buddy7", g: "Teamwork", e: "🤝", icon: "pack", nm: "Buddy Streak", how: "Seven days in a row where you and your buddy both trained." },
+    { id: "sensei", g: "Teamwork", e: "🎓", icon: "grad", nm: "Sensei", how: "Taught someone a skill, and they confirmed it." },
+    { id: "grandsensei", g: "Teamwork", e: "🏯", icon: "crown", nm: "Grand Sensei", how: "Taught five skills, each confirmed." },
     { id: "pack7", g: "Teamwork", e: "🐾", icon: "paw", nm: "Whole Pack", how: "Seven days where everyone trained. Whole pack badge.", pack: true },
     { id: "principal", g: "Teamwork", e: "🏫", icon: "crown", nm: "Puppy School Principal", how: "Reached level 10." }
   ],

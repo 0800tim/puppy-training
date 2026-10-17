@@ -168,14 +168,30 @@
       const toiletByDay = {}; toilet.forEach((t) => { if (t.by === p.id) { const x = iso(new Date(t.at)); toiletByDay[x] = (toiletByDay[x] || 0) + 1; } });
       let toiletPts = 0, toiletN = 0; for (const x in toiletByDay) { toiletN += toiletByDay[x]; toiletPts += Math.min(P.toiletCap, toiletByDay[x] * P.toilet); }
       points += toiletPts;
+      // confirmed teaching: teacher and learner both score, one teach a day per teacher
+      const teach = (state.teach || []).filter((t) => t.confirmed && !t.void);
+      const taughtDays = {}; let taught = 0, learned = 0;
+      teach.forEach((t) => { if (t.teacher === p.id) { const d = iso(new Date(t.confirmed)); if (!taughtDays[d]) { taughtDays[d] = 1; taught++; } } if (t.learner === p.id) learned++; });
+      points += taught * (P.teach || 15) + learned * (P.learn || 10);
+      const taughtSkills = new Set(teach.filter((t) => t.teacher === p.id).map((t) => t.skill)).size;
       let socialN = 0; const social = state.social || {};
       for (const item in social) { const L = (social[item] || []).filter((x) => !x.void); if (L.some((x) => x.by === p.id)) socialN++; }
       points += socialN * (P.social || 5);
-      people[p.id] = { socialN, id: p.id, kind, target, points, streak, atRisk, usedFreeze, freezesLeft: Math.max(0, 2 - freezesThisWeek), bestStreak: best, comeback,
+      people[p.id] = { socialN, taught: taughtSkills, learned, id: p.id, kind, target, points, streak, atRisk, usedFreeze, freezesLeft: Math.max(0, 2 - freezesThisWeek), bestStreak: best, comeback,
         weekSessions, weekByDay, weekPct: Math.min(100, Math.round((weekSessions / target) * 100)), bestWeek, perfectWeek, today: dayCount[todayS] || 0,
         early, owl, hattricks, confirmed: [...confirmed], rated, toiletN, badges: [] };
     });
 
+    // buddy streaks: an opt-in pair; counts days both trained, freezes don't apply
+    fam.forEach((p) => {
+      const b = p.buddy && fam.find((x) => x.id === p.buddy && x.id !== p.id);
+      if (!b) { people[p.id].buddy = null; return; }
+      const both = (d) => days[d] && days[d][p.id] && days[d][p.id].n > 0 && days[d][b.id] && days[d][b.id].n > 0;
+      let streak = 0, best = 0, run = 0;
+      for (let d = both(todayS) ? todayS : addDays(todayS, -1); d >= first && both(d); d = addDays(d, -1)) streak++;
+      allDays.forEach((d) => { if (both(d)) { run++; if (run > best) best = run; } else run = 0; });
+      people[p.id].buddy = { with: b.id, streak, best, today: !!both(todayS) };
+    });
     // pack: days where everyone (who had joined) trained
     let packStreak = 0, packDays = 0;
     const packDay = (d) => fam.length > 0 && fam.every((p) => days[d] && days[d][p.id] && days[d][p.id].n > 0);
@@ -242,6 +258,9 @@
       if (dryDay) b.push("dryday");
       if (socialHappy >= 10) b.push("social10");
       if (socialHappy >= 40) b.push("social40");
+      if (me.buddy && me.buddy.best >= 7) b.push("buddy7");
+      if (me.taught >= 1) b.push("sensei");
+      if (me.taught >= 5) b.push("grandsensei");
       if (packBest >= 7) b.push("pack7");
       me.level = levelOf(me.points, C.levels);
       if (me.level.n >= 10) b.push("principal");

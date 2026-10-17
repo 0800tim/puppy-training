@@ -407,3 +407,7 @@ button.vid{width:100%;border:1px solid var(--line);font:inherit;text-align:left;
 .cue{flex:none;scroll-snap-align:start;display:grid;gap:0;text-align:left;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:14px;padding:8px 12px;min-width:112px;max-width:160px;cursor:pointer;box-shadow:var(--shadow)}
 .cue b{font-family:var(--font-display);font-size:.95rem;color:var(--brand)}
 .cue small{color:var(--muted);font-size:.72rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* teaching */
+.card.confirm{border:1.5px solid var(--sun);background:linear-gradient(135deg,var(--surface),var(--sun-soft))}
+.row.teach select{flex:1;min-width:150px}

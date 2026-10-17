@@ -118,7 +118,7 @@ function createApp(opts = {}) {
 
   /* ---------- store ---------- */
   const storeFile = path.join(dataDir, "store.json");
-  let db = { rev: 1, settings: null, ticks: {}, logs: {}, mastery: {}, toilet: [], push: [], sent: null, social: {}, share: null };
+  let db = { rev: 1, settings: null, ticks: {}, logs: {}, mastery: {}, toilet: [], push: [], sent: null, social: {}, share: null, teach: [] };
   if (fs.existsSync(storeFile)) { try { db = Object.assign(db, JSON.parse(fs.readFileSync(storeFile, "utf8"))); } catch (e) { log("store.json unreadable, starting fresh:", e.message); } }
   function persist(bump = true) {
     if (bump) db.rev++;
@@ -128,6 +128,7 @@ function createApp(opts = {}) {
   }
   const photoFile = path.join(dataDir, "photo.jpg");
   const stateOut = () => ({ rev: db.rev, settings: db.settings, ticks: db.ticks, logs: db.logs, mastery: db.mastery, toilet: db.toilet.slice(-300), social: db.social || {}, photo: fs.existsSync(photoFile), today: localToday(),
+    teach: (db.teach || []).filter((t) => !t.void).slice(-200),
     push: (db.push || []).map((s) => ({ id: s.id, pid: s.pid, prefs: s.prefs || {}, created: s.created, label: s.label || "" })), sms: !!smsSender, vapid: vapid.publicKey, share: db.share ? { token: db.share.token, created: db.share.created } : null });
   /* ---------- push keys, notifier ---------- */
   const vapidFile = path.join(dataDir, "vapid.json");
@@ -148,8 +149,9 @@ function createApp(opts = {}) {
       const t = Number(m && m.target);
       return { id: str(m && m.id, 24), name: str(m && m.name, 20), kind, age: AGES.has(m && m.age) ? m.age : "",
         target: Number.isInteger(t) && t >= 1 && t <= 30 ? t : CONTENT.kinds[kind].target,
-        phone: NOTIFY.normalisePhone(m && m.phone), sms: !!(m && m.sms) };
+        phone: NOTIFY.normalisePhone(m && m.phone), sms: !!(m && m.sms), buddy: str(m && m.buddy, 24) };
     }).filter((m) => /^[A-Za-z0-9]{1,24}$/.test(m.id) && m.name);
+    family.forEach((m) => { if (!m.buddy || m.buddy === m.id || !family.some((o) => o.id === m.buddy)) m.buddy = ""; });
     if (!family.length) return null;
     return {
       puppy: { name: str(p.name, 24), sex: p.sex === "boy" ? "boy" : "girl", breed: str(p.breed, 80), born: DATE_RE.test(p.born) ? p.born : "" },
@@ -382,6 +384,31 @@ function createApp(opts = {}) {
       const pup = (db.settings && db.settings.puppy.name) || "Your puppy";
       try { await smsSender(to.phone, pup + " here. Texts are on for " + to.name + ". I'll text once a day at most, only if nothing is on the chart. puppy.appspurt.com"); return send(res, 200, { ok: true }); }
       catch (e) { return send(res, 502, { error: "SMS failed: " + e.message }); }
+    }
+    // "I taught X this": the learner confirms from their own phone, then both score
+    if (p === "/api/teach" && req.method === "POST") {
+      if (!me) return needMe();
+      const body = await readJson(req);
+      const learner = member(body.learner);
+      if (!SKILL_IDS.has(body.skill)) return send(res, 400, { error: "Unknown skill" });
+      if (!learner || learner.id === me.id) return send(res, 400, { error: "Pick who you taught" });
+      db.teach = db.teach || [];
+      if (db.teach.some((t) => !t.void && t.teacher === me.id && t.learner === learner.id && t.skill === body.skill)) return send(res, 409, { error: "Already logged" });
+      db.teach.push({ id: crypto.randomBytes(6).toString("hex"), skill: body.skill, teacher: me.id, learner: learner.id, at: now(), confirmed: null });
+      if (db.teach.length > 500) db.teach = db.teach.slice(-500);
+      persist(); return send(res, 200, out());
+    }
+    if ((m = p.match(/^\/api\/teach\/([a-f0-9]{12})$/)) && (req.method === "PUT" || req.method === "DELETE")) {
+      if (!me) return needMe();
+      const t = (db.teach || []).find((x) => x.id === m[1] && !x.void);
+      if (!t) return send(res, 404, { error: "Not found" });
+      if (req.method === "DELETE") {
+        if (t.teacher !== me.id && t.learner !== me.id && !isAdult) return send(res, 403, { error: "Not yours" });
+        t.void = true; persist(); return send(res, 200, out());
+      }
+      if (t.learner !== me.id) return send(res, 403, { error: "Only " + (member(t.learner) || { name: "the learner" }).name + " can confirm that" });
+      if (!t.confirmed) t.confirmed = now();
+      persist(); return send(res, 200, out());
     }
     if (p === "/api/share" && req.method === "POST") {
       if (!isAdult) return send(res, 403, { error: "Grown-ups only" });

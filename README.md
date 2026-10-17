@@ -159,9 +159,10 @@ Contributions welcome, especially new skills, better videos, translations, breed
 
 **Weekly challenges**: nine puppy-voiced family challenges rotate, one a week; the whole family gets the points when one is won.
 
+**Buddies and teaching**: pick a buddy in Settings and share a streak (days you both train). On any open skill, log "I taught this to…"; the learner confirms from their own phone and you both score. Badges for a 7-day buddy streak, the first confirmed lesson and the fifth.
+
 ## Roadmap
 
-- Buddy streaks between two people and co-signed "I taught my brother Sit".
 - Weight on a growth curve, vaccine and worming dates.
 - A pinned cue sheet and a shareable visitor card for grandparents and sitters.
 - CSV export and a printable certificate per puppy level.

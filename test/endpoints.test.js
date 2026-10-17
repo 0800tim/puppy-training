@@ -144,3 +144,41 @@ test("visitor card: grown-ups make and revoke a link; the page is public by link
     assert.equal((await fetch(base + "/api/visitor/" + again.json.share.token)).status, 404, "revoked");
   } finally { app.stop(); }
 });
+
+test("teaching: the teacher logs it, only the learner can confirm, both score once it is confirmed", async () => {
+  const app = await boot();
+  try {
+    const kid = await app.as("k"), mum = await app.as("a");
+    assert.equal((await app.call("POST", "/api/teach", { skill: "sit", learner: "k" }, kid)).status, 400, "not yourself");
+    assert.equal((await app.call("POST", "/api/teach", { skill: "nope", learner: "a" }, kid)).status, 400);
+    const t = await app.call("POST", "/api/teach", { skill: "sit", learner: "a" }, kid);
+    assert.equal(t.status, 200); assert.equal(t.json.teach[0].confirmed, null);
+    assert.equal((await app.call("POST", "/api/teach", { skill: "sit", learner: "a" }, kid)).status, 409, "no double logging");
+    const id = t.json.teach[0].id;
+    assert.equal((await app.call("PUT", "/api/teach/" + id, {}, kid)).status, 403, "the teacher can't confirm their own claim");
+    const c = await app.call("PUT", "/api/teach/" + id, {}, mum);
+    assert.ok(c.json.teach[0].confirmed > 0);
+    const S = R.compute(Object.assign({}, c.json), C, { today: "2026-10-17" });
+    assert.equal(S.people.k.points, C.points.teach); assert.equal(S.people.a.points, C.points.learn);
+    assert.ok(S.people.k.badges.includes("sensei"));
+    const d = await app.call("DELETE", "/api/teach/" + id, undefined, kid);
+    assert.equal(d.json.teach.length, 0);
+  } finally { app.stop(); }
+});
+
+test("buddies: an opt-in pair in settings; the streak counts days both trained", async () => {
+  const app = await boot();
+  try {
+    const mum = await app.as("a");
+    const st = (await app.call("GET", "/api/state", undefined, mum)).json.settings;
+    st.family[0].buddy = "a"; st.family[1].buddy = "zzz";
+    const saved = await app.call("PUT", "/api/settings", st, mum);
+    assert.equal(saved.json.settings.family[0].buddy, "a"); assert.equal(saved.json.settings.family[1].buddy, "", "unknown buddy dropped");
+    const ticks = {};
+    ["2026-10-15", "2026-10-16", "2026-10-17"].forEach((d) => { ticks[d + "_k_pm"] = { at: 1, by: "k" }; ticks[d + "_a_pm"] = { at: 1, by: "a" }; });
+    ticks["2026-10-14_k_pm"] = { at: 1, by: "k" };
+    const S = R.compute({ settings: saved.json.settings, ticks, logs: {}, mastery: {}, toilet: [] }, C, { today: "2026-10-17" });
+    assert.deepEqual(S.people.k.buddy, { with: "a", streak: 3, best: 3, today: true });
+    assert.equal(S.people.a.buddy, null, "Mum didn't pick a buddy");
+  } finally { app.stop(); }
+});
