@@ -731,7 +731,7 @@ function renderPack() {
     el("div", { class: "row", style: "justify-content:space-between" }, [el("div", { class: "eyebrow", text: "This week's podium" }), el("small", { class: "muted", text: "Percent of your own goal. Resets Sunday night." })]),
     el("div", { class: "podium" }, ranked.map((x, i) => el("div", { class: "prow", style: "--c:" + colorOf(x.p) }, [
       el("span", { class: "rank" + (i < 3 ? " medal" : ""), style: i < 3 ? "--mc:" + medalCol[i] : "", text: String(i + 1) }),
-      el("div", { class: "who" }, [avatar(x.p), el("div", {}, [el("b", { text: x.p.name }), el("small", { text: x.s.weekSessions + " of " + x.s.target + (x.s.streak ? " · 🔥 " + x.s.streak : "") })])]),
+      el("div", { class: "who" }, [avatar(x.p), el("div", {}, [el("b", { text: x.p.name }), el("small", {}, [x.s.weekSessions + " of " + x.s.target + (x.s.streak ? " · " : ""), x.s.streak ? icon("flame", "inl flame") : null, x.s.streak ? String(x.s.streak) : ""])])]),
       el("span", { class: "pct", text: x.s.weekPct + "%" })])))
   ]));
   // kids vs grown-ups
