@@ -30,6 +30,14 @@ async def run(b, url, label):
     assert "saved on this phone only" in txt, label + ": sync note explains local mode"
     assert await pg.locator("#set-photo").count() == 1, label + ": the photo still works locally (kept in localStorage)"
     assert await pg.locator("input[type=tel]").count() == 0, label + ": no phone numbers without a server"
+    # per-phone haptics switch (burn/a11y-followups): stored in localStorage, default on
+    assert await pg.locator("#haptics").is_checked(), label + ": haptics default on"
+    await pg.locator("#haptics").uncheck(); await pg.wait_for_timeout(200)
+    assert await pg.evaluate("localStorage.getItem('pt.haptics')") == "false", label + ": haptics off is saved per phone"
+    # the locked skill pill uses the sprite lock, not an emoji
+    await pg.get_by_role("tab", name="Skills").click(); await pg.wait_for_timeout(500)
+    assert await pg.locator(".pill svg use[href='#i-lock']").count() >= 1, label + ": locked pills use the sprite lock"
+    assert "🔒" not in await pg.locator("#p-skills").inner_text(), label + ": no lock emoji text"
     assert not errs, label + ": page errors " + str(errs)
     await ctx.close()
     print("ok:", label)

@@ -26,7 +26,8 @@ function el(tag, attrs, kids) {
 function lsGet(k, f) { try { const v = localStorage.getItem(k); return v == null ? f : JSON.parse(v); } catch (e) { return f; } }
 function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
 function toast(m) { const t = $("#toast"); t.textContent = m; t.classList.add("show"); clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove("show"), 2400); }
-const buzz = (p) => { try { if (navigator.vibrate) navigator.vibrate(p || 12); } catch (e) {} };
+// Haptics are per phone: Settings can turn them off (pt.haptics), independent of the phone's own vibration setting.
+const buzz = (p) => { try { if (navigator.vibrate && lsGet("pt.haptics", true) !== false) navigator.vibrate(p || 12); } catch (e) {} };
 
 /* ---------- dates ---------- */
 const pad = (n) => String(n).padStart(2, "0");
@@ -496,6 +497,7 @@ function renderSettings(firstRun) {
     const info = el("div", { class: "card", style: "display:grid;gap:10px" }, [
       el("div", { class: "field" }, [el("label", { text: "Whose phone is this?" }), whoSel]),
       el("div", { class: "field" }, [el("label", { text: "Appearance" }), seg]),
+      el("label", { class: "target" }, [el("input", { type: "checkbox", id: "haptics", checked: lsGet("pt.haptics", true) !== false, onchange: (e) => { lsSet("pt.haptics", e.target.checked); if (e.target.checked) buzz(12); } }), " Buzz for first badges and level-ups on this phone"]),
       el("div", { class: "row" }, [
         el("button", { class: "btn ghost", type: "button", text: "Export JSON", onclick: () => downloadFile("puppy-school-" + iso(today) + ".json", JSON.stringify(store.exportJson(), null, 2), "application/json") }),
         el("button", { class: "btn ghost", type: "button", text: "Export CSV", onclick: () => downloadFile("puppy-school-" + iso(today) + ".csv", exportCsv(), "text/csv") }),
@@ -1017,7 +1019,7 @@ function skillCard(s) {
   }
   if (s.help) body.append(el("button", { class: "chip", text: "Full biting plan →", onclick: () => show("help") }));
   body.append(vids(s.v));
-  const pill = st.mastered ? el("span", { class: "pill good", text: "Mastered" }) : !st.open ? el("span", { class: "pill", text: "🔒 Locked" }) : st.votes ? el("span", { class: "pill warm", text: st.votes + "/" + st.need }) : st.practising ? el("span", { class: "pill warm", text: "Practising" }) : el("span", { class: "pill open", text: "Open" });
+  const pill = st.mastered ? el("span", { class: "pill good", text: "Mastered" }) : !st.open ? el("span", { class: "pill" }, [icon("lock"), "Locked"]) : st.votes ? el("span", { class: "pill warm", text: st.votes + "/" + st.need }) : st.practising ? el("span", { class: "pill warm", text: "Practising" }) : el("span", { class: "pill open", text: "Open" });
   return el("details", { class: "acc skill" + (st.mastered ? " mastered" : !st.open ? " locked" : ""), id: "sk-" + s.id }, [el("summary", {}, [el("div", { class: "nm" }, [el("h3", { text: T(s.nm) }), el("small", { text: (s.req && s.req.length ? "Needs " + s.req.map((r) => skillById(r) ? T(skillById(r).nm) : r).join(", ") : "No prerequisites") })]), pill]), body]);
 }
 function renderSkills() {
