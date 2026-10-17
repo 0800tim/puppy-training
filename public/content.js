@@ -1,5 +1,5 @@
 /*
- * Puppy Training — all the training content lives in this one file.
+ * Puppy Training: all the training content lives in this one file.
  * Edit it freely: add skills, change the plan, swap videos.
  * Video ids are YouTube ids. kind "shorts" opens youtube.com/shorts/<id>.
  * Every video below was checked as live when it was added.
@@ -117,7 +117,7 @@ const PUPPY_CONTENT = {
     { id: "bang", req: ["down"], nm: "Play dead (Bang!)", wk: 6, role: "tricks", steps: ["Start like Roll over, but stop when she's on her side.", "\"Yes!\" and treat while she's lying flat.", "Build up to holding it for 2 seconds.", "Add \"Bang!\" with a finger-gun. Then the drama is up to her."], done: "Flops on her side for \"Bang!\" and stays still for 2 seconds.", v: ["8DHyOAvGwGw"] }
   ],
 
-  /* ---------- Help! Behaviour fixes. Biting first. ---------- */
+  /* ---------- Tips tab: behaviour fixes. Biting first. ---------- */
   sos: {
     title: "She's biting right now",
     steps: [
@@ -245,6 +245,89 @@ const PUPPY_CONTENT = {
   ],
 
   /* ---------- Famous trainers ---------- */
+  /* ---------- Tips: living with the other pets. Reward-based, management first. ---------- */
+  pets: {
+    intro: "A puppy joining a house that already has a dog or a cat is a bigger change for them than for her. The older animals did not ask for this. Give them space, keep their routines, and let the puppy earn her place slowly. Most trouble comes from going too fast.",
+    sections: [
+      { id: "meetdog", nm: "Introducing her to the dog you already have", icon: "pack", tag: "Day one",
+        what: "First impressions stick. Meet on neutral ground, keep it short, and let the older dog set the pace.",
+        steps: [
+          "Before she comes home, swap smells: a blanket she has slept on goes in the older dog's bed for a day, and one of theirs goes in her crate.",
+          "First meeting outside the house, on the footpath or a friend's lawn, both on lead, one person each. Walk the same way a few metres apart, treats for calm looks, close the gap over ten minutes.",
+          "Let them sniff for three seconds, then call both away cheerfully and treat. Three seconds, break, repeat. Long sniffs become stiff sniffs.",
+          "Into the house: older dog first, puppy on lead. Pick up toys, chews and food bowls before she walks in. Nothing to argue over on day one.",
+          "Short sessions together, then the puppy goes to her pen for a nap and the older dog gets the house back. Repeat for days, not hours."
+        ],
+        do: ["Let the older dog walk away whenever they want. A dog that can leave rarely needs to fight.", "Feed in separate rooms, with the door shut, from the first meal.", "Keep the older dog's walks, bed, lap time and routine exactly as they were."],
+        dont: ["Don't hold the puppy up to the older dog's face. Noses meet on the ground, side on.", "Don't leave them alone together until she is well past the mouthy stage, and then only with nothing to guard.", "Don't tell the older dog off for a growl. It is information, and the only polite way they have to say no."] },
+      { id: "twodogs", nm: "Two dogs in the house: the first months", icon: "heart", tag: "Weeks 1 to 20",
+        what: "Up to about 16 to 20 weeks most adult dogs give puppies a licence: they tolerate rudeness they would never accept from an adult. Then the licence runs out and the older dog starts correcting. Use the licence period to teach her manners yourself, so the older dog never has to.",
+        steps: [
+          "She is on lead or behind a gate indoors until she can be calm near the older dog. Freedom is earned, a room at a time.",
+          "Teach \"Leave\" and \"Settle\" early and use them for the older dog: reward her for turning away from them, for lying down near them, for ignoring them while they eat a chew.",
+          "One-on-one time every day for the older dog, out of her sight: a walk, a game, ten minutes on the couch. The old dog's life should get better, not worse.",
+          "Chews and bones are eaten in separate rooms or crates. High-value food together is how good friends fall out.",
+          "The older dog gets places she cannot follow: a bed behind a gate, the couch while she is in the pen, the car. An exit is the best peacekeeper."
+        ],
+        do: ["Praise the older dog for walking away from her instead of snapping.", "Watch for the older dog hiding, going off their food or sleeping in odd places. That is a dog who needs more breaks from the puppy.", "Train them separately. She cannot learn Sit while the other dog is being fed for Sit."],
+        dont: ["Don't expect the older dog to raise her. They can teach some manners; the rest is your job.", "Don't let her pester a sleeping or eating dog, ever. Call her away and reward, every time.", "Don't let the kids referee. Dog-to-dog moments are grown-up moments."] },
+      { id: "terrier", nm: "If the older dog is a terrier", icon: "alert", tag: "Jack Russells especially",
+        what: "Terriers were bred to work alone, hold their ground and win arguments with things that bite back. A Jack Russell can be bossy, quick to guard a lap, a bed or a person, and short on patience with a bouncing puppy. None of that is a fault. Plan for it.",
+        steps: [
+          "The terrier's things stay the terrier's: their bed, their spot on the couch, their person's lap. Teach the puppy that those are off limits, with a gate if words are not enough yet.",
+          "Guarding shows as a stiff body, a hard stare and a low growl when the puppy approaches something. Call the puppy away and reward her. Never take the thing off the terrier in front of her.",
+          "Chase games are out. A terrier that chases a squealing puppy can tip from play into prey in a second, and a puppy that chases a terrier will be told off hard.",
+          "Tug and wrestle one dog at a time. Two dogs on one toy is a fight waiting to start.",
+          "If the terrier corrects her with a growl or an air snap and she backs off, that is a good correction. Say nothing. If it is teeth on skin, or the terrier keeps going after she has backed off, step in and separate for an hour."
+        ],
+        do: ["Give the terrier more of what they like, not less: the walks, the digging spot, the lap.", "Keep the terrier's routine rigid for the first month. Predictable days keep bossy dogs calm.", "Teach the puppy a rock-solid Leave and a Settle on a mat before you ask them to share a room."],
+        dont: ["Don't pick up the terrier to keep them safe from her. Being carried above the puppy makes guarding worse. Gate the puppy instead.", "Don't let the puppy sleep in the terrier's bed, even when it is empty.", "Don't laugh off the terrier guarding the kids. A dog who guards a child from the puppy is a dog who may one day guard the child from a friend."] },
+      { id: "play", nm: "Play or fight? How to read it", icon: "play", tag: "Watch for this",
+        what: "Good dog play looks rough and sounds worse. The difference is in the pauses, the bounce and whether both dogs keep choosing to come back.",
+        green: ["Play bow: front end down, bum up, before a charge.", "Bouncy, loose, wiggly bodies. Exaggerated, inefficient moves.", "They swap roles: the chaser gets chased, the one on top ends up underneath.", "Short breaks every half minute or so, then both go back for more.", "The bigger or older dog goes easy: flops over, slows down, mouths softly.", "Open, soft mouths. Growls that come with a loose body."],
+        red: ["Stiff, still bodies, weight forward, tail high and tight.", "Hard stare, closed mouth, lips pulled back, ears pinned.", "One dog pinning the other and not letting up when it struggles.", "One dog trying to leave while the other keeps coming. Tucked tail, hiding behind a person.", "Yelps that get louder, not shorter. Real contact, not mouthing.", "No breaks at all. Play that only escalates is not play any more."],
+        steps: [
+          "The consent test: hold the more excited dog gently by the chest for five seconds and let go of the other one. If the other dog comes straight back for more, it was play. If they walk away, shake off or go to a person, they wanted it to stop. Give them that.",
+          "Call breaks yourself every minute or two while she is small: cheerful name, treat, five seconds of calm, then \"Go play\". Dogs who learn to pause rarely boil over."
+        ],
+        do: ["Let the older dog finish play on their own terms. Walking away is a complete sentence.", "Match sizes: a tired puppy plays badly. Nap first, play later."],
+        dont: ["Don't let the kids wind the dogs up with chasing or tug while the dogs are playing with each other.", "Don't wait for a yelp to decide. Read the bodies, not the sound."] },
+      { id: "separate", nm: "When to step in and separate", icon: "shield", tag: "The rules",
+        what: "Separating early and calmly is management, not punishment. Nobody is in trouble. The sooner you split them, the sooner they can try again.",
+        steps: [
+          "Any red signal from the list above: split them now, happily, with a treat each, in different rooms for an hour.",
+          "The older dog has corrected her twice in a few minutes and she has not changed her behaviour: she is overtired or overexcited. Pen, chew, nap.",
+          "A resource is involved: a bone, a toy, a dropped sandwich, a lap. Remove the thing or remove a dog. Then set up so it does not happen again.",
+          "Biting is too much when it is teeth on skin with pressure, when it keeps going after the other dog has stopped, or when either dog yelps and the other does not back off. Mouthing that stops on its own is fine; that is how she learns a soft mouth.",
+          "Any injury, however small, or a dog that goes quiet and avoids the other afterwards: separate for the rest of the day and ring a reward-based trainer before they are together again."
+        ],
+        do: ["Split with your voice, a treat scatter or a door, never your hands. If you must, lift the back legs of one dog like a wheelbarrow and back away.", "Keep a gate or a lead within reach while she is small. Reaching for one is half the plan.", "Write down what happened on the chart. Patterns show in a week."],
+        dont: ["Don't shout, grab collars or hit anyone. A fright makes the next meeting worse.", "Don't put them back together straight away to \"make up\". An hour apart, then a short, boring session together.", "Don't punish either dog afterwards. They will not connect it; they will only connect you with the other dog."] },
+      { id: "cat", nm: "Introducing her to the cat", icon: "paw", tag: "Weeks, not days",
+        what: "The cat decides the pace, and the cat is slower than any dog. A puppy who learns that chasing the cat is not an option in the first month is a dog who can live with cats for life. One good chase can undo it.",
+        steps: [
+          "Before she arrives, the cat's world gets height and exits: a shelf or a cat tree in every shared room, a gate the cat can jump but she cannot, and the litter tray, food and water somewhere she can never reach.",
+          "Scent first, for a few days: rub a cloth on the cat's cheeks and leave it in her pen; her blanket goes near the cat's food. Swap rooms so each explores the other's smell with no one there.",
+          "Then sight, through a gate or a slightly open door with a wedge. She is on lead. The cat chooses the distance. Treats for her for looking at the cat and looking back at you. Two to five minutes, then end it while it is boring.",
+          "Same room, she on lead, you on the floor with treats, cat free to leave. Reward every glance away from the cat. If she lunges or fixes, the session is over, no drama.",
+          "Off lead only when she can nap in the same room as the cat. For most puppies that is weeks. Until then, lead or gate, every time."
+        ],
+        do: ["Let the cat hiss and swat. A swat on the nose from a cat with claws in is the fastest lesson there is.", "Give the cat the puppy-free half of the house and keep it that way for the first month.", "Keep her tired and fed before cat sessions. A hungry, bored puppy sees a toy."],
+        dont: ["Don't hold the cat and bring it to her. Cats held still near a dog panic, and a panicking cat is the start of a chase.", "Don't let her chase, even once, even \"just playing\". Lead, gate, or the cat is elsewhere.", "Don't leave them alone together this year. A sleeping cat and a bored puppy is not a safe combination."] },
+      { id: "household", nm: "More than one pet: the house rules", icon: "home", tag: "Everyone",
+        what: "The rules the whole family keeps so the older animals stay happy and the puppy learns her place without a fight.",
+        steps: [
+          "Every animal eats alone, with a door shut. No one goes near anyone else's bowl, kids included.",
+          "Gates stay shut. Which rooms are the puppy's and which are the older pets' is decided once, calmly, and not renegotiated in the moment.",
+          "Older pets get first greeting when you come home. The puppy waits in the pen for thirty seconds.",
+          "One toy out at a time when the dogs are together, and it is yours, not theirs.",
+          "The older dog's walk is the older dog's walk. The puppy comes on short ones, on her own lead, with her own person.",
+          "Nobody ever tells a pet off for growling or hissing at the puppy. They tell the puppy to leave, then help her do it."
+        ],
+        do: ["Keep a note on the chart of how the older pets are doing. Eating, sleeping, playing as usual means the plan is working.", "Ring a reward-based trainer if the older dog is still stiff around her after a month, or if the cat has stopped coming into shared rooms."],
+        dont: ["Don't make the older pets share a bed, a bowl or a lap to \"get used to it\".", "Don't punish the puppy for wanting to play with them. Show her what to do instead, and reward that."] }
+    ]
+  },
   trainers: [
     { name: "Kikopup (Emily Larlham)", url: "https://www.youtube.com/@kikopup", style: "reward", line: "Step-by-step reward-based games. Brilliant for tricks and puppy problems.", v: ["c77--cCHPyU", "PwLfbkc8N24"] },
     { name: "McCann Dog Training", url: "https://www.youtube.com/@McCannDogs", style: "mixed", line: "Big Canadian puppy school. Puppy videos are mostly reward-based. They use collar and lead pressure with some older dogs.", v: ["0R-ndQN3zEk", "G4IG5kEHb8g"] },

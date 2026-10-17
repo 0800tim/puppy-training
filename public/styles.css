@@ -343,7 +343,6 @@ nav.tabs button{font-size:.68rem;font-weight:700;background:none;border:0;color:
 nav.tabs button svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round;padding:4px 12px;box-sizing:content-box;border-radius:99px;transition:background .2s,color .2s}
 nav.tabs button[aria-selected="true"]{color:var(--brand)}
 nav.tabs button[aria-selected="true"] svg{background:var(--brand-soft)}
-nav.tabs button.helpbtn[aria-selected="true"]{color:var(--brand)}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(92px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:99px;font-size:.9rem;z-index:7;opacity:0;transition:opacity .2s;pointer-events:none;max-width:90vw;text-align:center}
 .toast.show{opacity:1}
 @media (prefers-reduced-motion: reduce){*{transition:none!important;animation:none!important}}

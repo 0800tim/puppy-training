@@ -46,7 +46,7 @@ And the loudest complaint about all of them is billing and lock-in. So this one 
 - A **weekly podium** ranked by percent of each person's own goal, so a kid on 21 sessions and a parent on 10 race fairly. It resets Sunday night. Kids vs grown-ups runs alongside.
 - A **pack streak** for days where everyone trained.
 
-**Help!** An SOS card for "she's biting right now", twelve bite-sized biting topics, and sixteen other problems (chewing, jumping, night crying, toileting, guarding, herding nips, zoomies, barking, stealing, pulling, chasing, fear, vet handling, escaping, boredom).
+**Tips** An SOS card for "she's biting right now", twelve bite-sized biting topics, and sixteen other problems (chewing, jumping, night crying, toileting, guarding, herding nips, zoomies, barking, stealing, pulling, chasing, fear, vet handling, escaping, boredom).
 
 **Watch**: starter playlists, every 1-minute short in one place, and the well-known YouTube trainers, each labelled reward-based, mixed or uses corrections.
 
@@ -150,7 +150,9 @@ Contributions welcome, especially new skills, better videos, translations, breed
 - Each phone can turn on reminders: a nudge before school, one after school, one in the evening, and a streak-saver at 8pm, only when that slot is empty. Two a day at most, silent during school hours and at night, and they pause themselves after six ignored nudges. Grown-ups can see and pause every phone.
 - Optional daily text through an SMS gateway for anyone with a number saved, one a day, only if nothing is on the chart.
 
-**Kids and the puppy** (on Help): the seven safety rules, the Pat-Pet-Pause consent test, Be a Tree, a green/amber/red body-language game, and what each age can do.
+**Kids and the puppy** (on Tips): the seven safety rules, the Pat-Pet-Pause consent test, Be a Tree, a green/amber/red body-language game, and what each age can do.
+
+**The other pets** (on Tips): introducing the puppy to the dog you already have, the first months with two dogs, a section for terrier households (Jack Russells especially: bossy, guardy, quick to tip from play into prey), how to read play against a fight with a consent test, exactly when to step in and separate, introducing the puppy to the cat over weeks, and the house rules for a home with more than one pet. Management first, nobody told off for a growl or a hiss.
 
 **Socialising, the first year, and the breed**
 - A 60-item socialisation checklist in seven groups with "happy, unsure or scared" on each; whoever was there gets the points.

@@ -1201,6 +1201,18 @@ function renderHelp() {
       el("p", { class: "note", text: T(K.signalsNote) })])]));
     P.append(el("details", { class: "acc", id: "kids-ages" }, [el("summary", {}, el("div", { class: "nm" }, [el("h3", { text: "What each age can do" }), el("small", { text: "With a grown-up in the room, always" })])), el("div", { class: "acc-body" }, K.ages.map(([age, can, not]) => el("div", { class: "card", style: "display:grid;gap:6px;padding:12px" }, [el("b", { text: "Age " + age }), el("div", { class: "do" }, [el("b", { text: "Can: " }), T(can)]), el("div", { class: "dont" }, [el("b", { text: "Not yet: " }), T(not)])])))]));
   }
+  if (C.pets) {
+    P.append(el("div", { class: "eyebrow", text: pupName() + " and the other pets" }));
+    P.append(el("div", { class: "card focus" }, [el("h2", { class: "h2", text: "Dogs, cats and the new arrival" }), el("p", { class: "note", style: "margin-top:6px", text: T(C.pets.intro) })]));
+    C.pets.sections.forEach((s) => {
+      const body = el("div", { class: "acc-body" }, [el("p", { text: T(s.what) })]);
+      if (s.green) body.append(el("div", { class: "do" }, [el("b", { text: "Play: keep watching, let it run" }), el("ul", {}, s.green.map((x) => el("li", { text: T(x) })))]));
+      if (s.red) body.append(el("div", { class: "dont" }, [el("b", { text: "Not play: split them now" }), el("ul", {}, s.red.map((x) => el("li", { text: T(x) })))]));
+      if (s.steps) body.append(el("ol", { class: "steps" }, s.steps.map((x) => el("li", { text: T(x) }))));
+      body.append(list("do", "Do", s.do)); body.append(list("dont", "Don't", s.dont));
+      P.append(el("details", { class: "acc", id: "pet-" + s.id }, [el("summary", {}, [icon(s.icon, "inl"), el("div", { class: "nm" }, el("h3", { text: T(s.nm) })), s.tag ? el("span", { class: "pill", text: s.tag }) : null]), body]));
+    });
+  }
   P.append(el("div", { class: "eyebrow", text: "Stop the biting, in bite-sized pieces" }));
   C.biting.forEach((b) => {
     const body = el("div", { class: "acc-body" }, b.body.map((x) => el("p", { text: T(x) })));
