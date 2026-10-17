@@ -550,6 +550,16 @@ const PUPPY_CONTENT = {
     { match: "heading|huntaway|collie|border|kelpie|shepherd|cattle|corgi|herd", nm: "Herding dog in there", body: "Bred to stare, circle and grab at close quarters. Running, shrieking children are the most exciting thing she will ever see, so no chase games, and play the 'watch the runner' game: one child walks, then jogs, then runs, at a distance where she can still eat for staying with you. Sound sensitivity is common, so take the sounds list seriously. Legal chase outlets: flirt pole on grass in short bursts (from about 5 months), fetch along the ground, tug with rules." },
     { match: "terrier|jack russell|staffy|staffordshire|bull", nm: "Terrier in there", body: "Tenacious, mouthy and brave. Tug with rules (drop on cue) is the best game you have. Find-it and scent games burn energy without winding her up." },
     { match: "poodle|oodle|doodle|bichon|maltese", nm: "Companion breed in there", body: "Clever and people-focused. Alone-time training matters more than usual, and grooming handling (brush, clippers, dryer) belongs on the socialisation list early." }
-  ]
+  ],
+
+  /* ---------- health: NZ timings (Totally Vets, Petstock NZ; see hivemind research digest) ---------- */
+  health: {
+    kinds: [["vaccine", "Vaccination"], ["worm", "Worming"], ["flea", "Flea treatment"], ["vet", "Vet visit"], ["weight", "Weigh-in"]],
+    vaccines: [[8, "First core vaccine (distemper, hepatitis, parvo)"], [12, "Second core vaccine; leptospirosis optional"], [16, "Third core vaccine; walks on public ground about 10 days after"], [52, "Booster, 6 to 12 months after the course, then as the vet advises"]],
+    wormRule: "Every 2 weeks until 12 weeks, monthly until 6 months, then every 3 months. Weigh before each dose.",
+    wormNext: (ageWeeks) => (ageWeeks < 12 ? 14 : ageWeeks < 26 ? 30 : 91),
+    weightNote: "Weigh every 2 to 4 weeks until 6 months. A lean puppy has fewer joint problems: you should see a waist from above and feel the ribs easily. Crossing growth bands up or down is a vet conversation, not a diet.",
+    note: "Dates here are what NZ clinics usually do. Your vet's card wins. Nothing in this app is medical advice."
+  }
 };
 if (typeof module === "object" && module.exports) module.exports = PUPPY_CONTENT; else window.PUPPY_CONTENT = PUPPY_CONTENT;

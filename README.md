@@ -159,11 +159,13 @@ Contributions welcome, especially new skills, better videos, translations, breed
 
 **Weekly challenges**: nine puppy-voiced family challenges rotate, one a week; the whole family gets the points when one is won.
 
+**Cue sheet and visitor card**: the cue words are pinned on Today, and grown-ups can make a visitor link, a one-page card with the cue words, the biting steps and the house rules for grandparents and sitters, with no family names and no chart.
+
+**Health**: grown-ups log weigh-ins, vaccinations, worming, flea treatment and vet visits; the app draws the weight curve and says when the next vaccine, worming or weigh-in is due on the usual New Zealand timings.
+
 ## Roadmap
 
 - Buddy streaks between two people and co-signed "I taught my brother Sit".
-- Weight on a growth curve, vaccine and worming dates.
-- A pinned cue sheet and a shareable visitor card for grandparents and sitters.
 - CSV export and a printable certificate per puppy level.
 - Multi-family hosting so any family can sign up with their own PIN.
 

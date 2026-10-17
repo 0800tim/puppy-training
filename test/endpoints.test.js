@@ -144,3 +144,22 @@ test("visitor card: grown-ups make and revoke a link; the page is public by link
     assert.equal((await fetch(base + "/api/visitor/" + again.json.share.token)).status, 404, "revoked");
   } finally { app.stop(); }
 });
+
+test("health log: grown-ups record weights, vaccines and worming; entries can be voided", async () => {
+  const app = await boot();
+  try {
+    const kid = await app.as("k"), mum = await app.as("a");
+    assert.equal((await app.call("POST", "/api/healthlog", { kind: "weight", date: "2026-10-17", kg: 6.4 }, kid)).status, 403);
+    assert.equal((await app.call("POST", "/api/healthlog", { kind: "haircut", date: "2026-10-17" }, mum)).status, 400);
+    assert.equal((await app.call("POST", "/api/healthlog", { kind: "weight", date: "17/10/2026", kg: 6.4 }, mum)).status, 400);
+    assert.equal((await app.call("POST", "/api/healthlog", { kind: "weight", date: "2026-10-17", kg: "lots" }, mum)).status, 400);
+    const w = await app.call("POST", "/api/healthlog", { kind: "weight", date: "2026-10-17", kg: 6.449 }, mum);
+    assert.equal(w.status, 200); assert.equal(w.json.health[0].kg, 6.45); assert.equal(w.json.health[0].by, "a");
+    const v = await app.call("POST", "/api/healthlog", { kind: "vaccine", date: "2026-10-09", note: "First core, Nobivac" }, mum);
+    assert.equal(v.json.health.length, 2);
+    assert.equal((await app.call("DELETE", "/api/healthlog/" + w.json.health[0].id, undefined, kid)).status, 403);
+    const d = await app.call("DELETE", "/api/healthlog/" + w.json.health[0].id, undefined, mum);
+    assert.equal(d.json.health.length, 1, "voided entries are not sent");
+    assert.equal((await app.call("GET", "/api/state", undefined, kid)).json.health.length, 1, "kids can read the log");
+  } finally { app.stop(); }
+});

@@ -48,6 +48,7 @@ const TOILET_KINDS = new Set(CONTENT.toiletKinds.map((k) => k[0]));
 const TOILET_BEFORE = new Set(CONTENT.toiletBefore.map((k) => k[0]));
 const SOCIAL_ITEMS = new Set(CONTENT.socialGroups.flatMap((g) => g.items.map((it, i) => g.id + ":" + i)));
 const SOCIAL_MOODS = new Set(CONTENT.socialMoods.map((m) => m[0]));
+const HEALTH_KINDS = new Set(CONTENT.health.kinds.map((k) => k[0]));
 // Browsers only hand out push endpoints on these services. Anything else is a request to POST to a stranger's server.
 const PUSH_HOSTS = [".push.services.mozilla.com", "fcm.googleapis.com", "android.googleapis.com", ".notify.windows.com", "web.push.apple.com", ".push.apple.com"];
 const pushHostOk = (endpoint) => { try { const h = new URL(endpoint).hostname; return PUSH_HOSTS.some((d) => (d.startsWith(".") ? h.endsWith(d) : h === d)); } catch { return false; } };
@@ -118,7 +119,7 @@ function createApp(opts = {}) {
 
   /* ---------- store ---------- */
   const storeFile = path.join(dataDir, "store.json");
-  let db = { rev: 1, settings: null, ticks: {}, logs: {}, mastery: {}, toilet: [], push: [], sent: null, social: {}, share: null };
+  let db = { rev: 1, settings: null, ticks: {}, logs: {}, mastery: {}, toilet: [], push: [], sent: null, social: {}, share: null, health: [] };
   if (fs.existsSync(storeFile)) { try { db = Object.assign(db, JSON.parse(fs.readFileSync(storeFile, "utf8"))); } catch (e) { log("store.json unreadable, starting fresh:", e.message); } }
   function persist(bump = true) {
     if (bump) db.rev++;
@@ -127,7 +128,7 @@ function createApp(opts = {}) {
     fs.renameSync(tmp, storeFile);
   }
   const photoFile = path.join(dataDir, "photo.jpg");
-  const stateOut = () => ({ rev: db.rev, settings: db.settings, ticks: db.ticks, logs: db.logs, mastery: db.mastery, toilet: db.toilet.slice(-300), social: db.social || {}, photo: fs.existsSync(photoFile), today: localToday(),
+  const stateOut = () => ({ rev: db.rev, settings: db.settings, ticks: db.ticks, logs: db.logs, mastery: db.mastery, toilet: db.toilet.slice(-300), social: db.social || {}, health: (db.health || []).filter((h) => !h.void), photo: fs.existsSync(photoFile), today: localToday(),
     push: (db.push || []).map((s) => ({ id: s.id, pid: s.pid, prefs: s.prefs || {}, created: s.created, label: s.label || "" })), sms: !!smsSender, vapid: vapid.publicKey, share: db.share ? { token: db.share.token, created: db.share.created } : null });
   /* ---------- push keys, notifier ---------- */
   const vapidFile = path.join(dataDir, "vapid.json");
@@ -382,6 +383,25 @@ function createApp(opts = {}) {
       const pup = (db.settings && db.settings.puppy.name) || "Your puppy";
       try { await smsSender(to.phone, pup + " here. Texts are on for " + to.name + ". I'll text once a day at most, only if nothing is on the chart. puppy.appspurt.com"); return send(res, 200, { ok: true }); }
       catch (e) { return send(res, 502, { error: "SMS failed: " + e.message }); }
+    }
+    if (p === "/api/healthlog" && req.method === "POST") {
+      if (!isAdult) return send(res, 403, { error: "Grown-ups log health" });
+      const body = await readJson(req);
+      if (!HEALTH_KINDS.has(body.kind)) return send(res, 400, { error: "Bad kind" });
+      if (!DATE_RE.test(body.date)) return send(res, 400, { error: "Bad date" });
+      const kg = body.kind === "weight" ? Number(body.kg) : undefined;
+      if (body.kind === "weight" && !(kg > 0 && kg < 120)) return send(res, 400, { error: "Weight in kg, please" });
+      const entry = { id: crypto.randomBytes(6).toString("hex"), at: now(), date: body.date, kind: body.kind, note: typeof body.note === "string" ? body.note.trim().slice(0, 80) : "", by: me.id };
+      if (kg !== undefined) entry.kg = Math.round(kg * 100) / 100;
+      db.health = db.health || []; db.health.push(entry);
+      if (db.health.length > 500) db.health = db.health.slice(-500);
+      persist(); return send(res, 200, out());
+    }
+    if ((m = p.match(/^\/api\/healthlog\/([a-f0-9]{12})$/)) && req.method === "DELETE") {
+      if (!isAdult) return send(res, 403, { error: "Grown-ups log health" });
+      const h = (db.health || []).find((x) => x.id === m[1]);
+      if (!h) return send(res, 404, { error: "Not found" });
+      h.void = true; persist(); return send(res, 200, out());
     }
     if (p === "/api/share" && req.method === "POST") {
       if (!isAdult) return send(res, 403, { error: "Grown-ups only" });

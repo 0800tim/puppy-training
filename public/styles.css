@@ -407,3 +407,11 @@ button.vid{width:100%;border:1px solid var(--line);font:inherit;text-align:left;
 .cue{flex:none;scroll-snap-align:start;display:grid;gap:0;text-align:left;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:14px;padding:8px 12px;min-width:112px;max-width:160px;cursor:pointer;box-shadow:var(--shadow)}
 .cue b{font-family:var(--font-display);font-size:.95rem;color:var(--brand)}
 .cue small{color:var(--muted);font-size:.72rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* health */
+.wchart svg{width:100%;height:auto;display:block;background:var(--sunk);border-radius:12px}
+.due-list{display:grid;gap:6px}
+.due-row{background:var(--sunk);border-radius:12px;padding:8px 10px;font-size:.9rem;flex-wrap:nowrap}
+.due-row.soon{background:var(--sun-soft)}
+.due-row.now{background:var(--accent-soft)}
+.due-row small{color:var(--muted);white-space:nowrap}

@@ -55,7 +55,7 @@ function T(str) {
 }
 
 /* ---------- state ---------- */
-const S = { settings: null, ticks: {}, logs: {}, mastery: {}, toilet: [], photo: false, scores: null, push: [], sms: false, vapid: "", social: {}, me: undefined, adultPin: false };
+const S = { settings: null, ticks: {}, logs: {}, mastery: {}, toilet: [], photo: false, scores: null, push: [], sms: false, vapid: "", social: {}, me: undefined, adultPin: false, health: [] };
 let store = null;
 let viewDay = new Date(today);
 let staticKey = "";
@@ -118,10 +118,12 @@ class LocalStore {
     S.settings = lsGet("pt.settings", null);
     const t = lsGet("pt.ticks", {}); S.ticks = Array.isArray(t) ? Object.fromEntries(t.map((k) => [k, { at: 0 }])) : t;
     S.logs = lsGet("pt.logs", {}); S.mastery = lsGet("pt.mastery", {}); S.toilet = lsGet("pt.toilet", []);
-    S.photo = !!lsGet("pt.photo", null); S.social = lsGet("pt.social", {});
+    S.photo = !!lsGet("pt.photo", null); S.social = lsGet("pt.social", {}); S.health = lsGet("pt.health", []);
     cb();
   }
-  save() { lsSet("pt.settings", S.settings); lsSet("pt.ticks", S.ticks); lsSet("pt.logs", S.logs); lsSet("pt.mastery", S.mastery); lsSet("pt.toilet", S.toilet); lsSet("pt.social", S.social); this.cb(); }
+  save() { lsSet("pt.settings", S.settings); lsSet("pt.ticks", S.ticks); lsSet("pt.logs", S.logs); lsSet("pt.mastery", S.mastery); lsSet("pt.toilet", S.toilet); lsSet("pt.social", S.social); lsSet("pt.health", S.health); this.cb(); }
+  async addHealth(x) { S.health.push(Object.assign({ id: Math.random().toString(16).slice(2, 14), at: Date.now() }, x)); this.save(); }
+  async voidHealth(id) { S.health = S.health.filter((h) => h.id !== id); this.save(); }
   async setSocial(item, by, mood, on) { const L = (S.social[item] || []).filter((x) => x.by !== by); if (on !== false) L.push({ by, mood, at: Date.now() }); S.social[item] = L; this.save(); }
   async saveSettings(x) { S.settings = x; this.save(); }
   async setTick(k, on, extra) { if (on) S.ticks[k] = Object.assign({ at: Date.now() }, extra || {}); else delete S.ticks[k]; this.save(); }
@@ -140,7 +142,7 @@ class ServerStore {
     this.rev = j.rev;
     S.settings = j.settings || null;
     S.ticks = j.ticks || {}; S.logs = j.logs || {}; S.mastery = j.mastery || {}; S.toilet = j.toilet || [];
-    S.push = j.push || []; S.sms = !!j.sms; S.vapid = j.vapid || ""; S.social = j.social || {}; S.adultPin = !!j.adultPin; S.share = j.share || null;
+    S.push = j.push || []; S.sms = !!j.sms; S.vapid = j.vapid || ""; S.social = j.social || {}; S.adultPin = !!j.adultPin; S.share = j.share || null; S.health = j.health || [];
     if ("me" in j) { S.me = j.me; if (j.me && j.me !== meId) { meId = j.me; lsSet("pt.me", j.me); } }
     if (j.photo !== S.photo) { S.photo = !!j.photo; this.photoBust = Date.now(); }
     this.cb();
@@ -188,6 +190,8 @@ class ServerStore {
   setMastery(skill, by, witness, on) { return this.write("PUT", "api/mastery/" + skill, { by, witness, on }); }
   setSocial(item, by, mood, on) { return this.write("PUT", "api/social/" + item, { by, mood, on }); }
   makeShare() { return this.write("POST", "api/share", {}); }
+  addHealth(x) { return this.write("POST", "api/healthlog", x); }
+  voidHealth(id) { return this.write("DELETE", "api/healthlog/" + id); }
   dropShare() { return this.write("DELETE", "api/share"); }
   addToilet(x) { return this.write("POST", "api/toilet", x); }
   voidToilet(id) { return this.write("DELETE", "api/toilet/" + id); }
@@ -990,6 +994,65 @@ function renderSkills() {
   P.append(el("div", { class: "card" }, el("ul", { class: "plain" }, C.rules.map((x) => el("li", { text: T(x) })))));
   renderSocial(P);
   renderTimeline(P);
+  renderHealth(P);
+}
+
+/* ---------- health: weight curve, vaccines, worming ---------- */
+function weightChart(points) {
+  if (points.length < 2) return null;
+  const W = 300, H = 120, pad = 24;
+  const xs = points.map((p) => parseIso(p.date).getTime()), ys = points.map((p) => p.kg);
+  const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.max(0, Math.min(...ys) - 1), y1 = Math.max(...ys) + 1;
+  const X = (x) => pad + ((x - x0) / Math.max(1, x1 - x0)) * (W - pad * 2), Y = (y) => H - pad + ((y - y0) / Math.max(0.1, y1 - y0)) * -(H - pad * 2);
+  const d = points.map((p, i) => (i ? "L" : "M") + X(parseIso(p.date).getTime()).toFixed(1) + " " + Y(p.kg).toFixed(1)).join(" ");
+  const dots = points.map((p) => '<circle cx="' + X(parseIso(p.date).getTime()).toFixed(1) + '" cy="' + Y(p.kg).toFixed(1) + '" r="4" fill="var(--brand)"/>').join("");
+  const labels = '<text x="' + pad + '" y="' + (H - 6) + '" font-size="10" fill="var(--muted)">' + short(parseIso(points[0].date)) + '</text><text x="' + (W - pad) + '" y="' + (H - 6) + '" font-size="10" fill="var(--muted)" text-anchor="end">' + short(parseIso(points[points.length - 1].date)) + '</text><text x="4" y="' + (pad - 8) + '" font-size="10" fill="var(--muted)">' + y1.toFixed(0) + ' kg</text><text x="4" y="' + (H - pad + 4) + '" font-size="10" fill="var(--muted)">' + y0.toFixed(0) + '</text>';
+  return el("div", { class: "wchart", role: "img", "aria-label": "Weight from " + points[0].kg + " kg on " + short(parseIso(points[0].date)) + " to " + points[points.length - 1].kg + " kg on " + short(parseIso(points[points.length - 1].date)), html: '<svg viewBox="0 0 ' + W + " " + H + '"><path d="' + d + '" fill="none" stroke="var(--brand)" stroke-width="2.5" stroke-linejoin="round"/>' + dots + labels + "</svg>" });
+}
+function renderHealth(P) {
+  const H = C.health; const m = me(); const adult = isAdult(m) || !family().some(isAdult);
+  const born = S.settings && parseIso(S.settings.puppy.born);
+  const ageWk = born ? Math.floor(Math.round((today - born) / 864e5) / 7) : null;
+  const log = (S.health || []).slice().sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  const weights = log.filter((h) => h.kind === "weight" && h.kg);
+  const last = (kind) => log.filter((h) => h.kind === kind).slice(-1)[0] || null;
+  P.append(el("div", { class: "eyebrow", text: pupName() + "'s health" }));
+  const card = el("div", { class: "card", style: "display:grid;gap:12px" });
+  // weight
+  const lw = weights[weights.length - 1];
+  card.append(el("div", { class: "row", style: "justify-content:space-between" }, [el("b", { text: "Weight" }), el("small", { class: "muted", text: lw ? lw.kg + " kg on " + short(parseIso(lw.date)) : "Not weighed yet" })]));
+  const chart = weightChart(weights); if (chart) card.append(chart);
+  card.append(el("p", { class: "note", text: T(H.weightNote) }));
+  // due next
+  const due = [];
+  if (ageWk != null) {
+    const nextVax = H.vaccines.find(([wk]) => wk > ageWk - 1 && !log.some((h) => h.kind === "vaccine" && Math.abs(Math.round((parseIso(h.date) - born) / 864e5 / 7) - wk) <= 2));
+    if (nextVax) due.push({ k: "vaccine", when: addDays(born, nextVax[0] * 7), what: nextVax[1] });
+    const lwm = last("worm");
+    due.push({ k: "worm", when: lwm ? addDays(parseIso(lwm.date), H.wormNext(ageWk)) : today, what: lwm ? "Worming due (" + H.wormRule.split(".")[0].toLowerCase() + ")" : "No worming logged yet. " + H.wormRule });
+    if (!lw || (today - parseIso(lw.date)) / 864e5 > 28) due.push({ k: "weight", when: today, what: "Weigh-in (every 2 to 4 weeks until 6 months)" });
+  }
+  if (due.length) card.append(el("div", { class: "due-list" }, due.map((d) => { const days = Math.round((d.when - today) / 864e5); return el("div", { class: "row due-row" + (days <= 0 ? " now" : days <= 7 ? " soon" : "") }, [icon(d.k === "vaccine" ? "shield" : d.k === "worm" ? "leaf" : "target", "inl"), el("span", { style: "flex:1", text: d.what }), el("small", { text: days <= 0 ? "due now" : days === 1 ? "tomorrow" : "in " + days + " days" })]); })));
+  // the log
+  if (log.length) card.append(el("div", { class: "tlist" }, log.slice(-8).reverse().map((h) => el("div", { class: "row small", style: "justify-content:space-between" }, [
+    el("span", { text: short(parseIso(h.date)) + " · " + (H.kinds.find((k) => k[0] === h.kind) || ["", h.kind])[1] + (h.kg ? " " + h.kg + " kg" : "") + (h.note ? " · " + h.note : "") }),
+    adult ? el("button", { class: "linkbtn", type: "button", text: "remove", "aria-label": "Remove this health entry", onclick: () => safe(() => store.voidHealth(h.id)) }) : null]))));
+  // add
+  if (adult) {
+    const kind = el("select", { "aria-label": "What" }, H.kinds.map(([k, l]) => el("option", { value: k, text: l })));
+    const date = el("input", { type: "date", value: iso(today), "aria-label": "Date" });
+    const kg = el("input", { type: "number", step: "0.05", min: "0.2", max: "120", placeholder: "kg", "aria-label": "Weight in kg", style: "width:84px" });
+    const note = el("input", { type: "text", maxlength: "80", placeholder: "Note (vet, product)", "aria-label": "Note", style: "flex:1;min-width:140px" });
+    const sync = () => { kg.hidden = kind.value !== "weight"; };
+    kind.addEventListener("change", sync); kind.value = weights.length || !log.length ? "weight" : "worm"; sync();
+    card.append(el("div", { class: "row" }, [kind, date, kg, note, el("button", { class: "btn", type: "button", text: "Add", onclick: () => safe(async () => {
+      const x = { kind: kind.value, date: date.value, note: note.value };
+      if (kind.value === "weight") { x.kg = Number(kg.value); if (!(x.kg > 0)) { toast("Weight in kg, please"); return; } }
+      await store.addHealth(x); note.value = ""; kg.value = "";
+    }, "Logged") })]));
+  } else card.append(el("p", { class: "note", text: "Grown-ups log weights and vet dates." }));
+  card.append(el("p", { class: "note", text: H.note }));
+  P.append(card);
 }
 
 /* ---------- socialisation checklist ---------- */
