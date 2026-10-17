@@ -1,6 +1,6 @@
 /* Service worker: caches the app shell so it opens instantly and works offline.
    The family chart (api/*) always goes to the network. Bump VERSION when shipping changes. */
-const VERSION = "pt-v15";
+const VERSION = "pt-v16";
 const V = VERSION.replace("pt-v", "");
 const SHELL = ["./", "index.html", "styles.css?v=" + V, "content.js?v=" + V, "rewards.js?v=" + V, "theme.js?v=" + V, "app.js?v=" + V, "manifest.webmanifest", "icon.svg", "icon-192.png", "icon-512.png", "apple-touch-icon.png"];
 
