@@ -736,7 +736,8 @@ function downloadFile(name, text, type) {
 }
 // One flat file a spreadsheet opens cleanly: every entry in the chart as a row.
 function exportCsv() {
-  const q = (v) => '"' + String(v == null ? "" : v).replace(/"/g, '""') + '"';
+  // Quoted, and a cell that starts with = + - @ or a tab gets a leading apostrophe so Excel and Sheets read it as text, not a formula.
+  const q = (v) => { let s = String(v == null ? "" : v); if (/^[=+\-@\t\r]/.test(s)) s = "'" + s; return '"' + s.replace(/"/g, '""') + '"'; };
   const who = (id) => (person(id) ? person(id).name : id || "");
   const when = (ms) => (ms ? new Date(ms).toISOString() : "");
   const rows = [["type", "date", "person", "detail", "value", "logged_by", "logged_at"]];
