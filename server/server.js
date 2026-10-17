@@ -48,6 +48,11 @@ const TOILET_KINDS = new Set(CONTENT.toiletKinds.map((k) => k[0]));
 const TOILET_BEFORE = new Set(CONTENT.toiletBefore.map((k) => k[0]));
 const SOCIAL_ITEMS = new Set(CONTENT.socialGroups.flatMap((g) => g.items.map((it, i) => g.id + ":" + i)));
 const SOCIAL_MOODS = new Set(CONTENT.socialMoods.map((m) => m[0]));
+// Browsers only hand out push endpoints on these services. Anything else is a request to POST to a stranger's server.
+const PUSH_HOSTS = [".push.services.mozilla.com", "fcm.googleapis.com", "android.googleapis.com", ".notify.windows.com", "web.push.apple.com", ".push.apple.com"];
+const pushHostOk = (endpoint) => { try { const h = new URL(endpoint).hostname; return PUSH_HOSTS.some((d) => (d.startsWith(".") ? h.endsWith(d) : h === d)); } catch { return false; } };
+const PUSH_CAP = 40;
+const UNDO_MS = 15 * 60e3;
 const localToday = () => { const d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); };
 
 function createApp(opts = {}) {
@@ -60,6 +65,8 @@ function createApp(opts = {}) {
   const now = opts.now || (() => Date.now());
   const log = opts.log || ((...a) => console.log(new Date().toISOString(), ...a));
   const pushSubject = opts.pushSubject || process.env.PUSH_SUBJECT || "mailto:hello@growthspurt.agency";
+  const adultPin = String(opts.adultPin ?? process.env.PUPPY_ADULT_PIN ?? "");
+  if (adultPin && !/^\d{4,8}$/.test(adultPin)) throw new Error("PUPPY_ADULT_PIN must be 4 to 8 digits, or unset.");
 
   fs.mkdirSync(dataDir, { recursive: true });
 
@@ -81,8 +88,19 @@ function createApp(opts = {}) {
     if (expect.length !== got.length || !crypto.timingSafeEqual(expect, got)) return false;
     try { const j = JSON.parse(Buffer.from(p, "base64url").toString()); return j.v === pinTag && j.exp > now(); } catch { return false; }
   }
+  const makeMe = (pid) => { const p = Buffer.from(JSON.stringify({ pid, v: pinTag })).toString("base64url"); return p + "." + sign(p); };
+  function validMe(tok) {
+    if (!tok || typeof tok !== "string") return null;
+    const [p, s] = tok.split("."); if (!p || !s) return null;
+    const expect = Buffer.from(sign(p)); const got = Buffer.from(s);
+    if (expect.length !== got.length || !crypto.timingSafeEqual(expect, got)) return null;
+    try { const j = JSON.parse(Buffer.from(p, "base64url").toString()); return j.v === pinTag && typeof j.pid === "string" ? j.pid : null; } catch { return null; }
+  }
+  const meCookie = (req, pid) => "pt_me=" + (pid ? makeMe(pid) : "") + "; Path=/; HttpOnly; SameSite=Strict; Max-Age=" + (pid ? Math.floor(sessionDays * 86400) : 0) + (isHttps(req) ? "; Secure" : "");
   const pinHash = crypto.createHash("sha256").update(pin).digest();
   const pinMatches = (tryPin) => crypto.timingSafeEqual(pinHash, crypto.createHash("sha256").update(String(tryPin)).digest());
+  const adultPinHash = adultPin ? crypto.createHash("sha256").update(adultPin).digest() : null;
+  const adultPinMatches = (tryPin) => !!adultPinHash && crypto.timingSafeEqual(adultPinHash, crypto.createHash("sha256").update(String(tryPin)).digest());
 
   /* ---------- brute-force protection ---------- */
   const fails = new Map(); // ip -> [timestamps]
@@ -193,103 +211,138 @@ function createApp(opts = {}) {
       const cookie = "pt_session=" + makeToken() + "; Path=/; HttpOnly; SameSite=Strict; Max-Age=" + Math.floor(sessionDays * 86400) + (isHttps(req) ? "; Secure" : "");
       return send(res, 200, { ok: true }, { "Set-Cookie": cookie });
     }
-    if (p === "/api/logout" && req.method === "POST") return send(res, 200, { ok: true }, { "Set-Cookie": "pt_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0" });
+    if (p === "/api/logout" && req.method === "POST") { res.setHeader("Set-Cookie", ["pt_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0", "pt_me=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0"]); return send(res, 200, { ok: true }); }
 
-    if (!validToken(cookies(req).pt_session)) return send(res, 401, { error: "PIN needed" });
+    const ck = cookies(req);
+    if (!validToken(ck.pt_session)) return send(res, 401, { error: "PIN needed" });
+    // Who is this phone? Set once with POST /api/me, signed by the server, never taken from a request body.
+    const me = member(validMe(ck.pt_me));
+    const isAdult = me && me.kind === "adult";
+    const hasAdult = !!(db.settings && db.settings.family.some((x) => x.kind === "adult"));
+    const out = (extra) => Object.assign(stateOut(), { me: me ? me.id : null, adultPin: !!adultPinHash }, extra || {});
+    const needMe = () => send(res, 403, { error: "Pick yourself first", code: "pick" });
 
     if (p === "/api/state" && req.method === "GET") {
       const since = Number(u.searchParams.get("since"));
-      if (since && since === db.rev) return send(res, 200, { unchanged: true, rev: db.rev });
-      return send(res, 200, stateOut());
+      if (since && since === db.rev) return send(res, 200, { unchanged: true, rev: db.rev, me: me ? me.id : null });
+      return send(res, 200, out());
     }
+    if (p === "/api/me" && req.method === "POST") {
+      const body = await readJson(req);
+      const who = member(body.pid);
+      if (!who) return send(res, 400, { error: "Who?" });
+      if (who.kind === "adult" && adultPinHash) {
+        const ip = clientIp(req);
+        const wait = lockedFor(ip);
+        if (wait > 0) return send(res, 429, { error: "Too many tries", retryAfter: wait }, { "Retry-After": String(wait) });
+        if (!adultPinMatches(body.adultPin ?? "")) { recordFail(ip); log("adult pin failed", ip); return send(res, 403, { error: "Grown-up PIN needed", code: "adultpin" }); }
+        fails.delete(ip);
+      }
+      log("me", who.id, clientIp(req));
+      return send(res, 200, Object.assign(stateOut(), { me: who.id, adultPin: !!adultPinHash }), { "Set-Cookie": meCookie(req, who.id) });
+    }
+    if (p === "/api/me" && req.method === "DELETE") return send(res, 200, out({ me: null }), { "Set-Cookie": meCookie(req, null) });
     if (p === "/api/settings" && req.method === "PUT") {
+      // Once a grown-up exists, only a grown-up can change the family, goals and phone numbers.
+      if (hasAdult && !isAdult) return send(res, 403, { error: "Ask a grown-up to change the family" });
       const s = cleanSettings(await readJson(req));
       if (!s) return send(res, 400, { error: "Need at least one family member" });
-      db.settings = s; persist(); return send(res, 200, stateOut());
+      db.settings = s; persist(); return send(res, 200, out());
     }
     let m;
     if ((m = p.match(/^\/api\/ticks\/([^/]+)$/)) && req.method === "PUT") {
       const key = decodeURIComponent(m[1]);
       if (!TICK_RE.test(key)) return send(res, 400, { error: "Bad tick" });
       const body = await readJson(req);
-      const by = member(body.by);
+      if (!me) return needMe();
       const date = key.slice(0, 10);
-      if (by && by.kind === "kid" && date < localToday()) return send(res, 403, { error: "Ask a grown-up to log a past day" });
-      if (body.on) db.ticks[key] = { at: now(), by: by ? by.id : undefined, skill: SKILL_IDS.has(body.skill) ? body.skill : undefined };
+      if (!isAdult && date < localToday()) return send(res, 403, { error: "Ask a grown-up to log a past day" });
+      const prev = db.ticks[key];
+      if (!body.on && prev && !isAdult && prev.by && prev.by !== me.id && now() - (prev.at || 0) > UNDO_MS) return send(res, 403, { error: "Only " + (member(prev.by) || { name: "they" }).name + " or a grown-up can undo that" });
+      if (body.on) db.ticks[key] = { at: now(), by: me.id, skill: SKILL_IDS.has(body.skill) ? body.skill : undefined };
       else delete db.ticks[key];
-      if (by) (db.push || []).forEach((s) => { if (s.pid === by.id) s.unanswered = 0; });
-      persist(); return send(res, 200, stateOut());
+      (db.push || []).forEach((s) => { if (s.pid === me.id) s.unanswered = 0; });
+      persist(); return send(res, 200, out());
     }
     if ((m = p.match(/^\/api\/mastery\/([a-z]+)$/)) && req.method === "PUT") {
       const skill = m[1];
       if (!SKILL_IDS.has(skill)) return send(res, 400, { error: "Unknown skill" });
       const body = await readJson(req);
-      const by = member(body.by), witness = member(body.witness);
-      if (!by) return send(res, 400, { error: "Who did it?" });
+      if (!me) return needMe();
+      const by = me, witness = member(body.witness);
       const entry = (db.mastery[skill] = db.mastery[skill] || { done: [] });
       entry.done = entry.done.filter((d) => d.by !== by.id);
       if (body.on !== false) {
         if (!witness || witness.id === by.id) return send(res, 400, { error: "Needs a witness who isn't you" });
         entry.done.push({ by: by.id, witness: witness.id, at: now() });
       }
-      persist(); return send(res, 200, stateOut());
+      persist(); return send(res, 200, out());
     }
     if ((m = p.match(/^\/api\/social\/([a-z]+:\d+)$/)) && req.method === "PUT") {
       if (!SOCIAL_ITEMS.has(m[1])) return send(res, 400, { error: "Unknown item" });
       const body = await readJson(req);
-      const by = member(body.by);
-      if (!by) return send(res, 400, { error: "Who's logging?" });
+      if (!me) return needMe();
+      const by = me;
       db.social = db.social || {};
       const L = (db.social[m[1]] = db.social[m[1]] || []).filter((x) => x.by !== by.id);
       if (body.on !== false) { if (!SOCIAL_MOODS.has(body.mood)) return send(res, 400, { error: "How did it go?" }); L.push({ by: by.id, mood: body.mood, at: now() }); }
       db.social[m[1]] = L;
-      persist(); return send(res, 200, stateOut());
+      persist(); return send(res, 200, out());
     }
     if (p === "/api/toilet" && req.method === "POST") {
       const body = await readJson(req);
-      const by = member(body.by);
+      if (!me) return needMe();
       if (!TOILET_KINDS.has(body.kind)) return send(res, 400, { error: "Bad kind" });
       const id = crypto.randomBytes(6).toString("hex");
-      db.toilet.push({ id, at: now(), kind: body.kind, before: TOILET_BEFORE.has(body.before) ? body.before : "", by: by ? by.id : undefined });
+      db.toilet.push({ id, at: now(), kind: body.kind, before: TOILET_BEFORE.has(body.before) ? body.before : "", by: me.id });
       if (db.toilet.length > 1000) db.toilet = db.toilet.slice(-1000);
-      persist(); return send(res, 200, stateOut());
+      persist(); return send(res, 200, out());
     }
     if ((m = p.match(/^\/api\/toilet\/([a-f0-9]{12})$/)) && req.method === "DELETE") {
       const t = db.toilet.find((x) => x.id === m[1]);
       if (!t) return send(res, 404, { error: "Not found" });
-      t.void = true; persist(); return send(res, 200, stateOut());
+      if (!me) return needMe();
+      if (!isAdult && !(t.by === me.id && now() - t.at <= UNDO_MS)) return send(res, 403, { error: "You can undo your own entry for 15 minutes; a grown-up can undo any" });
+      t.void = true; persist(); return send(res, 200, out());
     }
     if (p === "/api/push/subscribe" && req.method === "POST") {
       const body = await readJson(req);
+      if (!me) return needMe();
       const sub = body.subscription;
-      const who = member(body.pid);
-      if (!who || !sub || typeof sub.endpoint !== "string" || !/^https:\/\//.test(sub.endpoint) || !sub.keys || !sub.keys.p256dh || !sub.keys.auth) return send(res, 400, { error: "Bad subscription" });
-      db.push = (db.push || []).filter((s) => s.endpoint !== sub.endpoint);
+      if (!sub || typeof sub.endpoint !== "string" || sub.endpoint.length > 2048 || !/^https:\/\//.test(sub.endpoint) || !sub.keys || !sub.keys.p256dh || !sub.keys.auth) return send(res, 400, { error: "Bad subscription" });
+      if (!pushHostOk(sub.endpoint)) return send(res, 400, { error: "That push service isn't one we send to" });
+      const existing = (db.push || []).filter((s) => s.endpoint !== sub.endpoint);
+      if (existing.length >= PUSH_CAP) return send(res, 409, { error: "Too many phones have reminders on. Turn them off on an old phone first." });
+      db.push = existing;
       const id = crypto.createHash("sha256").update(sub.endpoint).digest("hex").slice(0, 12);
       const prefs = Object.assign({}, NOTIFY.DEFAULTS, body.prefs && typeof body.prefs === "object" ? body.prefs : {});
-      db.push.push({ id, pid: who.id, endpoint: sub.endpoint, keys: { p256dh: String(sub.keys.p256dh), auth: String(sub.keys.auth) }, prefs, created: now(), label: String(body.label || "").slice(0, 40), unanswered: 0 });
-      if (db.push.length > 40) db.push = db.push.slice(-40);
-      persist(); return send(res, 200, Object.assign(stateOut(), { subId: id }));
+      db.push.push({ id, pid: me.id, endpoint: sub.endpoint, keys: { p256dh: String(sub.keys.p256dh), auth: String(sub.keys.auth) }, prefs, created: now(), label: String(body.label || "").slice(0, 40), unanswered: 0 });
+      persist(); return send(res, 200, out({ subId: id }));
     }
     if ((m = p.match(/^\/api\/push\/([a-f0-9]{12})$/)) && req.method === "PUT") {
       const sub = (db.push || []).find((s) => s.id === m[1]);
       if (!sub) return send(res, 404, { error: "Not found" });
       const body = await readJson(req);
-      const by = member(body.by);
-      const mine = by && by.id === sub.pid;
-      if (!mine && !(by && by.kind === "adult")) return send(res, 403, { error: "Only that person or a grown-up can change this" });
+      if (!me) return needMe();
+      if (me.id !== sub.pid && !isAdult) return send(res, 403, { error: "Only that person or a grown-up can change this" });
       const allowed = ["on", "am", "pm", "ev", "risk", "amAt", "amWeekendAt", "pmAt", "evAt", "riskAt"];
       const prefs = Object.assign({}, sub.prefs || {});
       allowed.forEach((k) => { if (body.prefs && k in body.prefs) { const v = body.prefs[k]; if (/At$/.test(k)) { if (/^\d{2}:\d{2}$/.test(v)) prefs[k] = v; } else prefs[k] = !!v; } });
       sub.prefs = prefs; if (prefs.on) sub.unanswered = 0;
-      persist(); return send(res, 200, stateOut());
+      persist(); return send(res, 200, out());
     }
     if ((m = p.match(/^\/api\/push\/([a-f0-9]{12})$/)) && req.method === "DELETE") {
-      db.push = (db.push || []).filter((s) => s.id !== m[1]); persist(); return send(res, 200, stateOut());
+      const sub = (db.push || []).find((s) => s.id === m[1]);
+      if (!sub) return send(res, 404, { error: "Not found" });
+      if (!me) return needMe();
+      if (me.id !== sub.pid && !isAdult) return send(res, 403, { error: "Only that person or a grown-up can turn this off" });
+      db.push = db.push.filter((s) => s.id !== m[1]); persist(); return send(res, 200, out());
     }
     if ((m = p.match(/^\/api\/push\/([a-f0-9]{12})\/test$/)) && req.method === "POST") {
       const sub = (db.push || []).find((s) => s.id === m[1]);
       if (!sub) return send(res, 404, { error: "Not found" });
+      if (!me) return needMe();
+      if (me.id !== sub.pid && !isAdult) return send(res, 403, { error: "Only that person or a grown-up can test this" });
       const pup = (db.settings && db.settings.puppy.name) || "Your puppy";
       try { const r = await (opts.sendPush || PUSH.sendPush)(sub, { title: pup + " says", body: "Reminders are on for this phone. " + pup + " will nudge you when a session is empty, never during school or at night.", tag: "test", url: "/#today" }, vapid, pushSubject);
         if (r.gone) { db.push = db.push.filter((s) => s.id !== sub.id); persist(); return send(res, 410, { error: "That subscription has expired. Turn reminders on again." }); }
@@ -298,8 +351,8 @@ function createApp(opts = {}) {
     }
     if (p === "/api/sms/test" && req.method === "POST") {
       const body = await readJson(req);
-      const by = member(body.by), to = member(body.pid);
-      if (!by || by.kind !== "adult") return send(res, 403, { error: "Grown-ups only" });
+      const to = member(body.pid);
+      if (!isAdult) return send(res, 403, { error: "Grown-ups only" });
       if (!to || !to.phone) return send(res, 400, { error: "No phone number saved for that person" });
       if (!smsSender) return send(res, 503, { error: "No SMS gateway configured on this server" });
       const pup = (db.settings && db.settings.puppy.name) || "Your puppy";
@@ -313,23 +366,24 @@ function createApp(opts = {}) {
         return fs.createReadStream(photoFile).pipe(res);
       }
       if (req.method === "PUT") {
+        if (hasAdult && !isAdult) return send(res, 403, { error: "Ask a grown-up to change the photo" });
         const body = await readJson(req, 600 * 1024);
         const mm = /^data:image\/jpeg;base64,([A-Za-z0-9+/=]+)$/.exec(String(body.data || ""));
         if (!mm) return send(res, 400, { error: "Send a JPEG data URL" });
         const buf = Buffer.from(mm[1], "base64");
         if (buf.length < 100 || buf.length > 400 * 1024 || buf[0] !== 0xff || buf[1] !== 0xd8) return send(res, 400, { error: "Not a JPEG, or too big" });
         fs.writeFileSync(photoFile, buf, { mode: 0o600 });
-        persist(); return send(res, 200, stateOut());
+        persist(); return send(res, 200, out());
       }
-      if (req.method === "DELETE") { try { fs.unlinkSync(photoFile); } catch {} persist(); return send(res, 200, stateOut()); }
+      if (req.method === "DELETE") { if (hasAdult && !isAdult) return send(res, 403, { error: "Ask a grown-up to change the photo" }); try { fs.unlinkSync(photoFile); } catch {} persist(); return send(res, 200, out()); }
     }
     if ((m = p.match(/^\/api\/logs\/(\d{4}-\d{2}-\d{2})$/)) && req.method === "PUT") {
       const body = await readJson(req);
       const bite = Number(body.bite);
       if (!Number.isInteger(bite) || bite < 0 || bite > 5) return send(res, 400, { error: "Bad value" });
-      const by = member(body.by);
-      if (bite === 0) delete db.logs[m[1]]; else db.logs[m[1]] = { bite, by: by ? by.id : undefined };
-      persist(); return send(res, 200, stateOut());
+      if (!me) return needMe();
+      if (bite === 0) delete db.logs[m[1]]; else db.logs[m[1]] = { bite, by: me.id };
+      persist(); return send(res, 200, out());
     }
     return send(res, 404, { error: "Not found" });
   }

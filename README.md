@@ -118,12 +118,18 @@ Then put HTTPS in front of it (Caddy, nginx, a Cloudflare Tunnel or Tailscale Fu
 | `DATA_DIR` | `./data` | `store.json` (the chart), `photo.jpg` and `secret.key` live here. Back it up. |
 | `SESSION_DAYS` | `180` | How long a phone stays unlocked. |
 | `TRUST_PROXY` | off | Set `1` behind a reverse proxy or tunnel so rate limits and secure cookies use the real client. |
+| `PUPPY_ADULT_PIN` | unset | Optional second PIN, 4 to 8 digits. When set, picking a grown-up profile on a phone asks for it, so kids can't act as grown-ups. |
+| `PUSH_SUBJECT` | `mailto:hello@growthspurt.agency` | Contact for push services (VAPID subject). Keys are generated into `DATA_DIR/vapid.json`. |
+| `AIVA_SMS_API_URL`, `AIVA_SMS_API_KEY`, `AIVA_SMS_DEVICE_ID`, `AIVA_SMS_SIM_SUBSCRIPTION_ID` | unset | Optional SMS gateway for daily texts. Leave unset and texts are simply off. |
+| `SESSION_SECRET` | generated | Signs the cookies. Generated into `DATA_DIR/secret.key` if unset. |
 
 #### How the PIN is protected
 
 - Wrong PINs are rate limited: 5 per device per 15 minutes, and 20 in total per hour across everyone. After that, even the right PIN waits.
 - Sessions are signed, HttpOnly, SameSite=Strict cookies. Writes must be JSON, which blocks cross-site form tricks.
-- Kids can't log past days (a grown-up can). Any tick can be undone by the person who made it within 15 minutes.
+- Each phone picks who it belongs to; the server signs that choice into a cookie and ignores any identity a request claims. Grown-up status comes from the family record, never from the phone. Set `PUPPY_ADULT_PIN` and picking a grown-up asks for it.
+- Once a grown-up exists, only grown-ups can change the family, goals, phone numbers and the puppy's photo. Kids can't log past days. You can undo your own entries for 15 minutes; a grown-up can undo anything.
+- Push subscriptions are only accepted for real browser push services, and there is a hard cap of 40 phones. See [`docs/SECURITY-REVIEW-2026-10.md`](docs/SECURITY-REVIEW-2026-10.md).
 - A short PIN is a family front-door lock, not bank security. It keeps strangers out of your chart. Don't store anything secret in it.
 
 ## Development

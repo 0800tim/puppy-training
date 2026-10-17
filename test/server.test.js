@@ -55,7 +55,8 @@ test("wrong PIN is refused, then rate limited", async () => {
 
 test("right PIN unlocks; ticks, logs and settings persist", async () => {
   const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), "pt-"));
-  const s2 = createApp({ pin: PIN, dataDir: dir2, log: () => {} });
+  let skew = 0;
+  const s2 = createApp({ pin: PIN, dataDir: dir2, log: () => {}, now: () => Date.now() + skew });
   await new Promise((r) => s2.listen(0, "127.0.0.1", r));
   const b2 = "http://127.0.0.1:" + s2.address().port;
   const prev = base; base = b2;
@@ -71,52 +72,96 @@ test("right PIN unlocks; ticks, logs and settings persist", async () => {
     assert.equal(st.json.settings.family[0].target, 21, "silly target falls back to the kid default");
     assert.equal(st.json.settings.family[1].target, 10, "adult default target");
 
-    const t = await call("PUT", "/api/ticks/2026-10-16_p1_am", { on: true, by: "p2", skill: "sit" }, cookie);
+    // identity comes from a server-signed cookie, never from the request body
+    assert.equal((await call("PUT", "/api/ticks/2026-10-16_p1_am", { on: true, by: "p2" }, cookie)).status, 403, "no phone identity yet");
+    assert.equal((await call("POST", "/api/me", { pid: "nobody" }, cookie)).status, 400);
+    const asKid = await call("POST", "/api/me", { pid: "p1" }, cookie);
+    assert.equal(asKid.status, 200); assert.equal(asKid.json.me, "p1");
+    const kid = cookie + "; " + asKid.cookie.split(";")[0];
+    const asMum = await call("POST", "/api/me", { pid: "p2" }, cookie);
+    const mum = cookie + "; " + asMum.cookie.split(";")[0];
+
+    const t = await call("PUT", "/api/ticks/2026-10-16_p1_am", { on: true, by: "p2", skill: "sit" }, mum);
     assert.ok(t.json.ticks["2026-10-16_p1_am"]);
-    assert.equal(t.json.ticks["2026-10-16_p1_am"].by, "p2", "who logged it is kept");
+    assert.equal(t.json.ticks["2026-10-16_p1_am"].by, "p2", "who logged it comes from the cookie, the body's by is ignored");
     assert.equal(t.json.ticks["2026-10-16_p1_am"].skill, "sit");
-    assert.equal((await call("PUT", "/api/ticks/nonsense", { on: true }, cookie)).status, 400);
-    const kidBackfill = await call("PUT", "/api/ticks/2020-01-01_p1_am", { on: true, by: "p1" }, cookie);
-    assert.equal(kidBackfill.status, 403, "kids can't log past days");
-    assert.equal((await call("PUT", "/api/ticks/2020-01-01_p1_am", { on: true, by: "p2" }, cookie)).status, 200, "grown-ups can");
-    const l = await call("PUT", "/api/logs/2026-10-16", { bite: 4, by: "p1" }, cookie);
+    assert.equal(t.json.me, "p2");
+    assert.equal((await call("PUT", "/api/ticks/nonsense", { on: true }, mum)).status, 400);
+    assert.equal((await call("PUT", "/api/ticks/2020-01-01_p1_am", { on: true }, kid)).status, 403, "kids can't log past days");
+    assert.equal((await call("PUT", "/api/ticks/2020-01-01_p1_am", { on: true }, mum)).status, 200, "grown-ups can");
+    // a kid can't undo someone else's tick after 15 minutes; a grown-up can
+    skew = 20 * 60e3;
+    assert.equal((await call("PUT", "/api/ticks/2026-10-16_p1_am", { on: false }, kid)).status, 403);
+    assert.equal((await call("PUT", "/api/ticks/2026-10-16_p1_am", { on: false }, mum)).status, 200);
+    await call("PUT", "/api/ticks/2026-10-16_p1_am", { on: true, skill: "sit" }, mum);
+
+    // settings and the photo: grown-ups only once a grown-up exists
+    assert.equal((await call("PUT", "/api/settings", st.json.settings, kid)).status, 403);
+    assert.equal((await call("PUT", "/api/settings", st.json.settings, mum)).status, 200);
+
+    const l = await call("PUT", "/api/logs/2026-10-16", { bite: 4 }, kid);
     assert.equal(l.json.logs["2026-10-16"].bite, 4);
     assert.equal(l.json.logs["2026-10-16"].by, "p1");
 
     // mastery needs a witness who isn't you; one vote per person
-    assert.equal((await call("PUT", "/api/mastery/sit", { by: "p1", witness: "p1" }, cookie)).status, 400);
-    assert.equal((await call("PUT", "/api/mastery/nope", { by: "p1", witness: "p2" }, cookie)).status, 400);
-    const mv = await call("PUT", "/api/mastery/sit", { by: "p1", witness: "p2" }, cookie);
+    assert.equal((await call("PUT", "/api/mastery/sit", { witness: "p1" }, kid)).status, 400);
+    assert.equal((await call("PUT", "/api/mastery/nope", { witness: "p2" }, kid)).status, 400);
+    const mv = await call("PUT", "/api/mastery/sit", { witness: "p2" }, kid);
     assert.equal(mv.json.mastery.sit.done.length, 1);
-    await call("PUT", "/api/mastery/sit", { by: "p1", witness: "p2" }, cookie);
-    const mv2 = await call("PUT", "/api/mastery/sit", { by: "p2", witness: "p1" }, cookie);
+    await call("PUT", "/api/mastery/sit", { witness: "p2" }, kid);
+    const mv2 = await call("PUT", "/api/mastery/sit", { witness: "p1" }, mum);
     assert.equal(mv2.json.mastery.sit.done.length, 2, "repeat vote by the same person doesn't double up");
-    const un = await call("PUT", "/api/mastery/sit", { by: "p2", on: false }, cookie);
+    const un = await call("PUT", "/api/mastery/sit", { on: false }, mum);
     assert.equal(un.json.mastery.sit.done.length, 1, "a vote can be taken back");
 
-    // toilet log, with undo
-    assert.equal((await call("POST", "/api/toilet", { kind: "swim", by: "p1" }, cookie)).status, 400);
-    const tl = await call("POST", "/api/toilet", { kind: "wee", before: "woke", by: "p1" }, cookie);
+    // toilet log: undo your own within 15 minutes, a grown-up any time
+    assert.equal((await call("POST", "/api/toilet", { kind: "swim" }, kid)).status, 400);
+    const tl = await call("POST", "/api/toilet", { kind: "wee", before: "woke" }, kid);
     assert.equal(tl.json.toilet.length, 1);
     assert.equal(tl.json.toilet[0].before, "woke");
-    const del = await call("DELETE", "/api/toilet/" + tl.json.toilet[0].id, undefined, cookie);
+    assert.equal(tl.json.toilet[0].by, "p1");
+    const del = await call("DELETE", "/api/toilet/" + tl.json.toilet[0].id, undefined, kid);
     assert.equal(del.json.toilet[0].void, true);
+    const tl2 = await call("POST", "/api/toilet", { kind: "poo" }, mum);
+    assert.equal((await call("DELETE", "/api/toilet/" + tl2.json.toilet[1].id, undefined, kid)).status, 403, "not yours");
+    assert.equal((await call("DELETE", "/api/toilet/" + tl2.json.toilet[1].id, undefined, mum)).status, 200);
 
     // socialisation: one entry per person per item, with a mood
-    assert.equal((await call("PUT", "/api/social/people:0", { by: "p1", mood: "thrilled" }, cookie)).status, 400);
-    assert.equal((await call("PUT", "/api/social/nope:9", { by: "p1", mood: "happy" }, cookie)).status, 400);
-    const so = await call("PUT", "/api/social/people:0", { by: "p1", mood: "happy" }, cookie);
+    assert.equal((await call("PUT", "/api/social/people:0", { mood: "thrilled" }, kid)).status, 400);
+    assert.equal((await call("PUT", "/api/social/nope:9", { mood: "happy" }, kid)).status, 400);
+    const so = await call("PUT", "/api/social/people:0", { mood: "happy" }, kid);
     assert.equal(so.json.social["people:0"].length, 1);
-    await call("PUT", "/api/social/people:0", { by: "p1", mood: "unsure" }, cookie);
-    const so2 = await call("GET", "/api/state", undefined, cookie);
+    await call("PUT", "/api/social/people:0", { mood: "unsure" }, kid);
+    const so2 = await call("GET", "/api/state", undefined, kid);
     assert.equal(so2.json.social["people:0"].length, 1, "re-logging replaces, never doubles");
     assert.equal(so2.json.social["people:0"][0].mood, "unsure");
+    assert.equal(so2.json.me, "p1");
 
-    // puppy photo: JPEG data URL in, image out
+    // push: only real push services, owner-or-grown-up on changes, a hard cap
+    const subFor = (n) => ({ endpoint: "https://fcm.googleapis.com/fcm/send/" + n, keys: { p256dh: "x", auth: "y" } });
+    assert.equal((await call("POST", "/api/push/subscribe", { subscription: { endpoint: "https://evil.example/collect", keys: { p256dh: "x", auth: "y" } } }, kid)).status, 400, "not a push service");
+    const ps = await call("POST", "/api/push/subscribe", { subscription: subFor("kid1"), label: "Android" }, kid);
+    assert.equal(ps.status, 200); assert.equal(ps.json.push[0].pid, "p1", "the phone belongs to whoever the cookie says");
+    const pm = await call("POST", "/api/push/subscribe", { subscription: subFor("mum1") }, mum);
+    const kidSub = ps.json.subId, mumSub = pm.json.subId;
+    assert.equal((await call("PUT", "/api/push/" + mumSub, { prefs: { on: false } }, kid)).status, 403, "kid can't touch mum's phone");
+    assert.equal((await call("PUT", "/api/push/" + kidSub, { prefs: { on: false } }, mum)).status, 200, "grown-up can pause a kid's phone");
+    assert.equal((await call("DELETE", "/api/push/" + mumSub, undefined, kid)).status, 403);
+    assert.equal((await call("DELETE", "/api/push/" + kidSub, undefined, kid)).status, 200, "your own, fine");
+    for (let i = 0; i < 39; i++) await call("POST", "/api/push/subscribe", { subscription: subFor("fill" + i) }, mum);
+    assert.equal((await call("POST", "/api/push/subscribe", { subscription: subFor("one-too-many") }, mum)).status, 409, "cap refuses, never evicts silently");
+    assert.equal((await call("POST", "/api/push/subscribe", { subscription: subFor("fill0") }, mum)).status, 200, "re-subscribing an existing phone is fine");
+    assert.equal((await call("POST", "/api/sms/test", { pid: "p2" }, kid)).status, 403, "grown-ups only");
+
+    const bye = await call("POST", "/api/logout", {}, mum);
+    assert.equal(bye.status, 200);
+
+    // puppy photo: JPEG data URL in, image out, grown-ups only
     assert.equal((await call("GET", "/api/photo", undefined, cookie)).status, 404);
-    assert.equal((await call("PUT", "/api/photo", { data: "data:image/png;base64,AAAA" }, cookie)).status, 400);
+    assert.equal((await call("PUT", "/api/photo", { data: "data:image/png;base64,AAAA" }, mum)).status, 400);
     const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(200, 1), Buffer.from([0xff, 0xd9])]);
-    const ph = await call("PUT", "/api/photo", { data: "data:image/jpeg;base64," + jpeg.toString("base64") }, cookie);
+    assert.equal((await call("PUT", "/api/photo", { data: "data:image/jpeg;base64," + jpeg.toString("base64") }, kid)).status, 403);
+    const ph = await call("PUT", "/api/photo", { data: "data:image/jpeg;base64," + jpeg.toString("base64") }, mum);
     assert.equal(ph.status, 200);
     assert.equal(ph.json.photo, true);
     const img = await fetch(b2 + "/api/photo", { headers: { Cookie: cookie } });
@@ -133,7 +178,7 @@ test("right PIN unlocks; ticks, logs and settings persist", async () => {
     assert.ok(saved.ticks["2026-10-16_p1_am"]);
 
     // writes must be JSON (blocks simple cross-site form posts)
-    const r = await fetch(b2 + "/api/ticks/2026-10-16_p1_pm", { method: "PUT", headers: { Cookie: cookie, "Content-Type": "text/plain" }, body: '{"on":true}' });
+    const r = await fetch(b2 + "/api/ticks/2026-10-16_p1_pm", { method: "PUT", headers: { Cookie: mum, "Content-Type": "text/plain" }, body: '{"on":true}' });
     assert.equal(r.status, 415);
   } finally { s2.close(); base = prev; fs.rmSync(dir2, { recursive: true, force: true }); }
 });
@@ -152,4 +197,23 @@ test("changing the PIN signs everyone out", async () => {
   const st = await fetch(bb + "/api/state", { headers: { Cookie: cookie } });
   assert.equal(st.status, 401);
   b.close(); fs.rmSync(dir3, { recursive: true, force: true });
+});
+
+test("a grown-up PIN, when set, gates picking a grown-up profile", async () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), "pt-"));
+  assert.throws(() => createApp({ pin: PIN, dataDir: d, adultPin: "12" }));
+  const a = createApp({ pin: PIN, dataDir: d, adultPin: "9999", log: () => {}, limits: { perIp: 3, global: 100 } });
+  await new Promise((r) => a.listen(0, "127.0.0.1", r));
+  const prev = base; base = "http://127.0.0.1:" + a.address().port;
+  try {
+    const login = await call("POST", "/api/login", { pin: PIN }); const cookie = login.cookie.split(";")[0];
+    await call("PUT", "/api/settings", { puppy: { name: "P", sex: "girl" }, start: "2026-10-16", family: [{ id: "k", name: "Kid", kind: "kid" }, { id: "a", name: "Dad", kind: "adult" }] }, cookie);
+    assert.equal((await call("POST", "/api/me", { pid: "k" }, cookie)).status, 200, "kids never need it");
+    const no = await call("POST", "/api/me", { pid: "a" }, cookie);
+    assert.equal(no.status, 403); assert.equal(no.json.code, "adultpin");
+    assert.equal((await call("POST", "/api/me", { pid: "a", adultPin: "0000" }, cookie)).status, 403);
+    const yes = await call("POST", "/api/me", { pid: "a", adultPin: "9999" }, cookie);
+    assert.equal(yes.status, 200); assert.equal(yes.json.adultPin, true);
+    assert.equal((await call("GET", "/api/state", undefined, cookie)).json.adultPin, true, "the app can tell a grown-up PIN exists");
+  } finally { a.close(); base = prev; fs.rmSync(d, { recursive: true, force: true }); }
 });

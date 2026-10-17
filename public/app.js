@@ -55,7 +55,7 @@ function T(str) {
 }
 
 /* ---------- state ---------- */
-const S = { settings: null, ticks: {}, logs: {}, mastery: {}, toilet: [], photo: false, scores: null, push: [], sms: false, vapid: "", social: {} };
+const S = { settings: null, ticks: {}, logs: {}, mastery: {}, toilet: [], photo: false, scores: null, push: [], sms: false, vapid: "", social: {}, me: undefined, adultPin: false };
 let store = null;
 let viewDay = new Date(today);
 let staticKey = "";
@@ -78,7 +78,18 @@ function disc(name, colour, cls) { return el("span", { class: "disc" + (cls ? " 
 let meId = lsGet("pt.me", null);
 const me = () => person(meId);
 const isAdult = (p) => !!p && p.kind === "adult";
-function setMe(id) { meId = id; lsSet("pt.me", id); }
+async function setMe(id) {
+  if (store && store.mode === "server") {
+    let adultPin;
+    const p = person(id);
+    if (p && p.kind === "adult" && S.adultPin) { adultPin = prompt("Grown-up PIN for " + p.name + ":"); if (adultPin == null) return false; }
+    const r = await api("POST", "api/me", { pid: id, adultPin });
+    if (r.status === 401) { location.reload(); return false; }
+    if (!r.ok) { toast((r.json && r.json.error) || "Couldn't switch"); return false; }
+    store.apply(r.json);
+  }
+  meId = id; lsSet("pt.me", id); return true;
+}
 
 /* ---------- theme ---------- */
 function applyTheme() {
@@ -129,7 +140,8 @@ class ServerStore {
     this.rev = j.rev;
     S.settings = j.settings || null;
     S.ticks = j.ticks || {}; S.logs = j.logs || {}; S.mastery = j.mastery || {}; S.toilet = j.toilet || [];
-    S.push = j.push || []; S.sms = !!j.sms; S.vapid = j.vapid || ""; S.social = j.social || {};
+    S.push = j.push || []; S.sms = !!j.sms; S.vapid = j.vapid || ""; S.social = j.social || {}; S.adultPin = !!j.adultPin;
+    if ("me" in j) { S.me = j.me; if (j.me && j.me !== meId) { meId = j.me; lsSet("pt.me", j.me); } }
     if (j.photo !== S.photo) { S.photo = !!j.photo; this.photoBust = Date.now(); }
     this.cb();
   }
@@ -138,6 +150,11 @@ class ServerStore {
     const r = await api("GET", "api/state");
     if (r.status === 401) return "pin";
     if (!r.ok) throw new Error("server");
+    if (r.json && r.json.settings && !r.json.me && meId && r.json.settings.family.some((p) => p.id === meId)) {
+      const p = r.json.settings.family.find((x) => x.id === meId);
+      if (!(p.kind === "adult" && r.json.adultPin)) { const m = await api("POST", "api/me", { pid: meId }); if (m.ok) r.json = m.json; }
+    }
+    if (r.json && r.json.settings && !r.json.me) { meId = null; try { localStorage.removeItem("pt.me"); } catch (e) {} }
     this.apply(r.json);
     if (!this.timer) {
       this.timer = setInterval(() => this.refresh(), 10000);
@@ -155,6 +172,7 @@ class ServerStore {
   async write(method, url, body) {
     const r = await api(method, url, body);
     if (r.status === 401) { location.reload(); return; }
+    if (r.status === 403 && r.json && r.json.code === "pick") { meId = null; renderWho(); throw new Error("Pick yourself first"); }
     if (!r.ok) throw new Error((r.json && r.json.error) || "save failed");
     this.apply(r.json);
   }
@@ -174,7 +192,7 @@ class ServerStore {
   setPhoto(data) { return data ? this.write("PUT", "api/photo", { data }) : this.write("DELETE", "api/photo"); }
   photoUrl() { return S.photo ? "api/photo?v=" + (this.photoBust || 0) : null; }
   exportJson() { return { settings: S.settings, ticks: S.ticks, logs: S.logs, mastery: S.mastery, toilet: S.toilet }; }
-  async subscribePush(subscription, pid, prefs, label) { const r = await api("POST", "api/push/subscribe", { subscription, pid, prefs, label }); if (!r.ok) throw new Error((r.json && r.json.error) || "save failed"); this.apply(r.json); return r.json.subId; }
+  async subscribePush(subscription, pid, prefs, label) { const r = await api("POST", "api/push/subscribe", { subscription, prefs, label }); if (!r.ok) throw new Error((r.json && r.json.error) || "save failed"); this.apply(r.json); return r.json.subId; }
   setPushPrefs(id, prefs, by) { return this.write("PUT", "api/push/" + id, { prefs, by }); }
   deletePush(id) { return this.write("DELETE", "api/push/" + id); }
   async testPush(id) { const r = await api("POST", "api/push/" + id + "/test"); if (!r.ok) throw new Error((r.json && r.json.error) || "test failed"); }
@@ -301,7 +319,7 @@ function renderWho(push) {
   P.append(el("div", { class: "card focus" }, [el("div", { class: "eyebrow", text: "Whose phone is this?" }), el("h2", { class: "h2", text: "Pick yourself" }),
     el("p", { class: "note", style: "margin-top:6px", text: "Your ticks, streak and badges go to you. Tap your name in the top bar any time to switch." })]));
   const grid = el("div", { class: "who-grid" });
-  family().forEach((p) => grid.append(el("button", { class: "who", style: "--c:" + colorOf(p), onclick: () => { setMe(p.id); buzz(); renderHeader(); renderAll(); show(current); } }, [avatar(p, "lg"), el("b", { text: p.name }), el("small", { text: C.kinds[p.kind] ? C.kinds[p.kind].name : "" })])));
+  family().forEach((p) => grid.append(el("button", { class: "who", style: "--c:" + colorOf(p), onclick: async () => { if (!(await setMe(p.id))) return; buzz(); renderHeader(); renderAll(); show(current); } }, [avatar(p, "lg"), el("b", { text: p.name }), el("small", { text: (C.kinds[p.kind] ? C.kinds[p.kind].name : "") + (p.kind === "adult" && S.adultPin ? " · PIN" : "") })])));
   P.append(grid);
   show("who", push);
 }
@@ -366,6 +384,7 @@ function cropPhoto(file) {
 function renderSettings(firstRun) {
   const P = $("#p-settings"); P.replaceChildren();
   const st = S.settings || { puppy: { name: "", sex: "girl", breed: "", born: "" }, start: iso(today), family: [{ id: "p1", name: "", kind: "kid", target: 21, age: "" }] };
+  const locked = !firstRun && store.mode === "server" && family().some(isAdult) && !isAdult(me());
   const fam = JSON.parse(JSON.stringify(st.family)).map((p) => { const kind = C.kinds[p.kind] ? p.kind : "kid"; return Object.assign({ age: "" }, p, { kind, target: Number(p.target) > 0 ? Number(p.target) : C.kinds[kind].target }); });
   const kindSel = (p) => el("select", { "aria-label": "Kid or grown-up", onchange: (e) => { p.kind = e.target.value; if (!p.touched) p.target = C.kinds[p.kind].target; drawFam(); } },
     Object.keys(C.kinds).map((k) => el("option", { value: k, selected: p.kind === k, text: C.kinds[k].name })));
@@ -419,7 +438,8 @@ function renderSettings(firstRun) {
       f("set-breed", "Breed", breed),
       f("set-start", "Plan starts", start, dateWords(start, ""))
     ]));
-  if (!firstRun) {
+  if (locked) [name, sex, breed, born, start].forEach((i) => (i.disabled = true));
+  if (!firstRun && !locked) {
     const photoCard = el("div", { class: "card", style: "display:grid;gap:10px" }, [el("div", { class: "eyebrow", text: pupName() + "'s photo" })]);
     const prev = el("div", { class: "photo-prev" + (S.photo ? " has" : "") });
     if (S.photo) prev.append(el("img", { src: store.photoUrl(), alt: "" })); else prev.textContent = "🐶";
@@ -435,18 +455,24 @@ function renderSettings(firstRun) {
       el("small", { class: "note", text: "Shows in the top corner on every phone. You crop it to a circle; it is kept small." })]), file]));
     P.append(photoCard);
   }
-  P.append(
-    el("div", { class: "eyebrow", text: "Who's training" }),
-    el("div", { class: "card", style: "display:grid;gap:10px" }, [famBox, addBtn,
-      el("p", { class: "note", text: "Everyone gets three 5-minute sessions a day on the chart and does every skill. The weekly goal is what your streak and progress are measured against: kids 21, grown-ups 10 by default." })]),
-    el("div", { class: "row" }, [save, firstRun ? null : el("button", { class: "btn ghost", type: "button", text: "Cancel", onclick: () => show(current) })])
-  );
+  if (locked) {
+    P.append(el("div", { class: "eyebrow", text: "Who's training" }),
+      el("div", { class: "card" }, [el("ul", { class: "plain" }, family().map((p) => el("li", { text: p.name + " · " + (C.kinds[p.kind] ? C.kinds[p.kind].name : "") + " · goal " + (p.target || C.kinds[p.kind].target) + " a week" }))),
+        el("p", { class: "note", style: "margin-top:8px", text: "Ask a grown-up to change names, goals or the puppy's details." })]));
+  } else {
+    P.append(
+      el("div", { class: "eyebrow", text: "Who's training" }),
+      el("div", { class: "card", style: "display:grid;gap:10px" }, [famBox, addBtn,
+        el("p", { class: "note", text: "Everyone gets three 5-minute sessions a day on the chart and does every skill. The weekly goal is what your streak and progress are measured against: kids 21, grown-ups 10 by default." })]),
+      el("div", { class: "row" }, [save, firstRun ? null : el("button", { class: "btn ghost", type: "button", text: "Cancel", onclick: () => show(current) })])
+    );
+  }
   if (!firstRun) {
     const themeNow = lsGet("pt.theme", "system");
     const seg = el("div", { class: "seg", role: "radiogroup", "aria-label": "Appearance" }, [["system", "Auto"], ["light", "Light"], ["dark", "Dark"]].map(([v, l]) =>
       el("button", { type: "button", role: "radio", "aria-checked": themeNow === v ? "true" : "false", text: l, onclick: (e) => { lsSet("pt.theme", v); applyTheme(); e.target.parentNode.querySelectorAll("button").forEach((b) => b.setAttribute("aria-checked", b === e.target ? "true" : "false")); } })));
     const whoSel = el("select", { "aria-label": "This phone belongs to" }, family().map((p) => el("option", { value: p.id, selected: p.id === meId, text: p.name })));
-    whoSel.addEventListener("change", (e) => { setMe(e.target.value); renderHeader(); renderAll(); toast("This phone is now " + person(meId).name + "'s"); });
+    whoSel.addEventListener("change", async (e) => { if (!(await setMe(e.target.value))) { e.target.value = meId; return; } renderHeader(); renderAll(); toast("This phone is now " + person(meId).name + "'s"); });
     const info = el("div", { class: "card", style: "display:grid;gap:10px" }, [
       el("div", { class: "field" }, [el("label", { text: "Whose phone is this?" }), whoSel]),
       el("div", { class: "field" }, [el("label", { text: "Appearance" }), seg]),
