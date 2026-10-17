@@ -235,9 +235,9 @@ function ring(n, total, size, color) {
     segs.push('<circle r="' + r + '" cx="18" cy="18" fill="none" stroke="' + (on ? color || "var(--blaze)" : "var(--sunk)") + '" stroke-width="3.6" stroke-dasharray="' + (100 / total - 4) + ' ' + (100 - 100 / total + 4) + '" stroke-dashoffset="' + (25 - (100 / total) * i) + '" stroke-linecap="round"/>');
   }
   const w = size || 44;
-  return el("span", { class: "ring", html: '<svg viewBox="0 0 36 36" width="' + w + '" height="' + w + '" aria-hidden="true">' + segs.join("") + '</svg><b>' + n + "/" + total + "</b>" });
+  return el("span", { class: "ring", role: "img", "aria-label": n + " of " + total + " sessions today", html: '<svg viewBox="0 0 36 36" width="' + w + '" height="' + w + '" aria-hidden="true">' + segs.join("") + '</svg><b aria-hidden="true">' + n + "/" + total + "</b>" });
 }
-function bar(pct, cls) { return el("div", { class: "bar " + (cls || "") }, el("i", { style: "width:" + Math.max(0, Math.min(100, pct)) + "%" })); }
+function bar(pct, cls, label) { const v = Math.round(Math.max(0, Math.min(100, pct))); return el("div", { class: "bar " + (cls || ""), role: "progressbar", "aria-valuenow": String(v), "aria-valuemin": "0", "aria-valuemax": "100", "aria-label": label || "Progress" }, el("i", { style: "width:" + v + "%" })); }
 function sparkline(vals) {
   const w = 7 * 12, h = 28;
   const pts = vals.map((v, i) => v ? '<rect x="' + (i * 12 + 2) + '" y="' + (h - v * 5) + '" width="8" height="' + v * 5 + '" rx="2" fill="' + (v <= 2 ? "var(--good)" : v === 3 ? "var(--warn)" : "var(--bad)") + '"/>' : '<rect x="' + (i * 12 + 2) + '" y="' + (h - 3) + '" width="8" height="3" rx="1.5" fill="currentColor" opacity=".3"/>').join("");
@@ -317,7 +317,7 @@ function cropPhoto(file) {
     let img; try { img = await loadBitmap(file); } catch (e) { toast(e.message); return resolve(null); }
     const iw = img.width, ih = img.height;
     const vp = Math.min(window.innerWidth - 32, 360), dpr = Math.min(2, window.devicePixelRatio || 1);
-    const cv = el("canvas", { width: vp * dpr, height: vp * dpr, style: "width:" + vp + "px;height:" + vp + "px" });
+    const cv = el("canvas", { width: vp * dpr, height: vp * dpr, style: "width:" + vp + "px;height:" + vp + "px", tabindex: "0", role: "img", "aria-label": "Photo crop. Arrow keys move, plus and minus zoom, R rotates." });
     const ctx = cv.getContext("2d");
     const st = { s: vp / Math.min(iw, ih), a: 0, x: 0, y: 0 };
     const minS = vp / Math.max(iw, ih) * 0.5;
@@ -341,6 +341,13 @@ function cropPhoto(file) {
     const up = (e) => { ptrs.delete(e.pointerId); last = ptrs.size ? geo() : null; };
     cv.addEventListener("pointerup", up); cv.addEventListener("pointercancel", up);
     cv.addEventListener("wheel", (e) => { e.preventDefault(); st.s = Math.max(minS, Math.min(st.s * (e.deltaY < 0 ? 1.08 : 0.92), 20)); draw(); }, { passive: false });
+    cv.addEventListener("keydown", (e) => {
+      const step = e.shiftKey ? 20 : 6;
+      if (e.key === "ArrowLeft") st.x -= step; else if (e.key === "ArrowRight") st.x += step; else if (e.key === "ArrowUp") st.y -= step; else if (e.key === "ArrowDown") st.y += step;
+      else if (e.key === "+" || e.key === "=") st.s = Math.min(20, st.s * 1.1); else if (e.key === "-" || e.key === "_") st.s = Math.max(minS, st.s / 1.1);
+      else if (e.key === "r" || e.key === "R") st.a += Math.PI / 2; else if (e.key === "Escape") { finish(false); return; } else return;
+      e.preventDefault(); draw();
+    });
     const finish = (ok) => {
       ov.remove(); document.body.style.overflow = "";
       if (!ok) return resolve(null);
@@ -353,14 +360,14 @@ function cropPhoto(file) {
       resolve(data);
     };
     const ov = el("div", { class: "cropper", role: "dialog", "aria-modal": "true", "aria-label": "Crop photo" }, [
-      el("p", { text: "Drag to move. Pinch to zoom. Two fingers to rotate." }),
+      el("p", { text: "Drag to move. Pinch to zoom. Two fingers to rotate. On a keyboard: arrows, plus, minus and R." }),
       cv,
       el("div", { class: "row", style: "justify-content:center" }, [
         el("button", { class: "btn ghost", type: "button", text: "↺ Rotate", onclick: () => { st.a -= Math.PI / 2; draw(); } }),
         el("button", { class: "btn ghost", type: "button", text: "Cancel", onclick: () => finish(false) }),
         el("button", { class: "btn", type: "button", text: "Use photo", onclick: () => finish(true) })])
     ]);
-    document.body.style.overflow = "hidden"; document.body.append(ov); draw();
+    document.body.style.overflow = "hidden"; document.body.append(ov); draw(); cv.focus();
   });
 }
 function renderSettings(firstRun) {
@@ -567,7 +574,7 @@ function renderToday() {
       el("div", { class: "hero-top" }, [
         el("div", { class: "hero-pup" }, [photo, el("span", { class: "lvl-badge", text: pl.n })]),
         el("div", { class: "hero-txt" }, [el("div", { class: "eyebrow", text: pupName() + " · level " + pl.n + " of " + C.puppyLevels.length }), el("h2", { text: pl.name }), el("small", { text: pl.next ? (pl.next - sc.puppy.points) + " points to " + pl.nextName : "Top of the tree" })])]),
-      bar(pl.pct, "big"),
+      bar(pl.pct, "big", pupName() + "'s progress to the next level"),
       el("div", { class: "hero-stats" }, [
         el("div", { class: "hs" }, [el("b", { text: sc.puppy.mastered + "/" + sc.puppy.total }), el("small", { text: "skills" })]),
         el("div", { class: "hs" }, [el("b", { text: String(sc.puppy.sessions) }), el("small", { text: "sessions" })]),
@@ -619,7 +626,7 @@ function renderToday() {
   P.append(el("div", { class: "card" }, [
     el("div", { class: "row", style: "justify-content:space-between" }, [el("div", { class: "eyebrow", text: T("How bitey was she today?") }),
       el("button", { class: "chip", text: "Biting plan →", onclick: () => show("help") })]),
-    el("div", { class: "meter" }, BITE.map(([e, l], i) => el("button", { "aria-pressed": cur === i + 1 ? "true" : "false", disabled: viewDay > today, onclick: () => safe(() => store.setLog(d, { bite: cur === i + 1 ? 0 : i + 1, by: m ? m.id : undefined })) }, [el("span", { class: "e", text: e }), el("span", { text: l })]))),
+    el("div", { class: "meter", role: "group", "aria-label": "How bitey was " + T("she") + " today, 1 to 5" }, BITE.map(([e, l], i) => el("button", { type: "button", "aria-pressed": cur === i + 1 ? "true" : "false", "aria-label": l + ", " + (i + 1) + " of 5", disabled: viewDay > today, onclick: () => safe(() => store.setLog(d, { bite: cur === i + 1 ? 0 : i + 1, by: m ? m.id : undefined })) }, [el("span", { class: "e", "aria-hidden": "true", text: e }), el("span", { text: l })]))),
     S.logs[d] && S.logs[d].by && person(S.logs[d].by) ? el("small", { class: "note", text: "Rated by " + person(S.logs[d].by).name }) : null
   ]));
 
@@ -670,7 +677,7 @@ function renderToilet(P, sc, m) {
   const todayList = tl.today.slice(-6).reverse();
   if (todayList.length) card.append(el("div", { class: "tlist" }, todayList.map((t) => el("div", { class: "row small" }, [
     el("span", {}, [icon(t.kind === "wee" ? "drop" : t.kind === "poo" ? "leaf" : "alert", "inl"), " " + new Date(t.at).toLocaleTimeString("en-NZ", { hour: "numeric", minute: "2-digit" }) + (t.before ? " · " + (C.toiletBefore.find((b) => b[0] === t.before) || ["", ""])[1].toLowerCase() : "") + (t.by && person(t.by) ? " · " + person(t.by).name : "")]),
-    el("button", { class: "linkbtn", type: "button", text: "undo", onclick: () => safe(() => store.voidToilet(t.id)) })]))));
+    el("button", { class: "linkbtn", type: "button", text: "undo", "aria-label": "Undo this toilet entry", onclick: () => safe(() => store.voidToilet(t.id)) })]))));
   const worst = Object.entries(tl.accidentsAfter).sort((a, b) => b[1] - a[1])[0];
   if (worst && worst[1] >= 2) card.append(el("p", { class: "note", text: "Pattern: most accidents happen " + (C.toiletBefore.find((b) => b[0] === worst[0]) || ["", ""])[1].toLowerCase() + ". Take " + T("her") + " out straight after that." }));
   P.append(card);
@@ -685,9 +692,15 @@ function confetti() {
   document.body.append(box); setTimeout(() => box.remove(), 3000);
 }
 function celebrate(title, sub, emoji) {
-  const ov = el("div", { class: "celebrate", role: "dialog", "aria-modal": "true" }, el("div", { class: "cbox" }, [el("div", { class: "cemoji", text: emoji || "🎉" }), el("h2", { text: title }), el("p", { text: sub }), el("button", { class: "btn", type: "button", text: "Nice!", onclick: () => ov.remove() })]));
-  ov.addEventListener("click", (e) => { if (e.target === ov) ov.remove(); });
-  document.body.append(ov); confetti(); buzz([30, 40, 30]);
+  const before = document.activeElement;
+  const ok = el("button", { class: "btn", type: "button", text: "Nice!" });
+  const ov = el("div", { class: "celebrate", role: "dialog", "aria-modal": "true", "aria-labelledby": "cele-h", "aria-describedby": "cele-p" }, el("div", { class: "cbox" }, [el("div", { class: "cemoji", "aria-hidden": "true", text: emoji || "🎉" }), el("h2", { id: "cele-h", text: title }), el("p", { id: "cele-p", text: sub }), ok]));
+  const close = () => { ov.remove(); document.removeEventListener("keydown", onKey); if (before && before.focus) before.focus(); };
+  const onKey = (e) => { if (e.key === "Escape") close(); };
+  ok.addEventListener("click", close);
+  ov.addEventListener("click", (e) => { if (e.target === ov) close(); });
+  document.addEventListener("keydown", onKey);
+  document.body.append(ov); ok.focus(); confetti(); buzz([30, 40, 30]);
 }
 function checkCelebrations() {
   const m = me(); const sc = m && scoreOf(m.id); if (!sc) return;
@@ -757,8 +770,8 @@ function renderPack() {
         el("span", { class: "stat", title: "Streak" }, [icon("flame"), String(ps.streak)]),
         el("span", { class: "stat", title: "Freezes left this week" }, [icon("snow"), String(ps.freezesLeft)]),
         el("span", { class: "stat", title: "Badges" }, [icon("medal"), String(ps.badges.length)])]),
-      el("div", { class: "wk" }, [bar(ps.weekPct, ""), el("small", { class: "muted", text: ps.weekSessions + " of " + ps.target + " this week (" + ps.weekPct + "%) · best week " + ps.bestWeek })]),
-      el("div", { class: "lvl" }, [bar(ps.level.pct, "thin"), el("small", { class: "muted", text: ps.level.next ? (ps.level.next - ps.points) + " pts to " + ps.level.nextName : "Top level" })])
+      el("div", { class: "wk" }, [bar(ps.weekPct, "", p.name + "'s week against goal"), el("small", { class: "muted", text: ps.weekSessions + " of " + ps.target + " this week (" + ps.weekPct + "%) · best week " + ps.bestWeek })]),
+      el("div", { class: "lvl" }, [bar(ps.level.pct, "thin", p.name + "'s progress to the next level"), el("small", { class: "muted", text: ps.level.next ? (ps.level.next - ps.points) + " pts to " + ps.level.nextName : "Top level" })])
     ]);
   })));
   // badges for the chosen person
@@ -766,7 +779,7 @@ function renderPack() {
   const grid = el("div", { class: "badge-grid" });
   const drawBadges = () => {
     const ps = scoreOf(who.id); const have = new Set(ps ? ps.badges : []);
-    grid.replaceChildren(...C.badges.map((b) => el("div", { class: "badge" + (have.has(b.id) ? " on" : ""), title: b.how }, [disc(b.icon || "star", BADGE_COLOUR[b.g] || "var(--accent)", "lg"), el("b", { text: b.nm }), el("small", { text: b.how })])));
+    grid.replaceChildren(...C.badges.map((b) => el("div", { class: "badge" + (have.has(b.id) ? " on" : ""), role: "img", "aria-label": b.nm + (have.has(b.id) ? ", earned. " : ", not yet. ") + b.how }, [disc(b.icon || "star", BADGE_COLOUR[b.g] || "var(--accent)", "lg"), el("b", { "aria-hidden": "true", text: b.nm }), el("small", { "aria-hidden": "true", text: b.how })])));
   };
   const chips = el("div", { class: "chips" }, family().map((p) => el("button", { class: "chip" + (p.id === who.id ? " on" : ""), type: "button", text: p.name, onclick: (e) => { who = p; chips.querySelectorAll(".chip").forEach((c) => c.classList.toggle("on", c === e.target)); drawBadges(); } })));
   drawBadges();
