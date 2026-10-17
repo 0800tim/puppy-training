@@ -169,8 +169,9 @@ run here. On bigmac, after the three merges:
 
 ```
 npm test                                   # expect 36 passing
-node --check public/app.js server/server.js
-python3 scripts/smoke-static.py            # static shell check
+npm run build                              # dist/puppy-school.html
+python3 -m http.server 9505 --bind 127.0.0.1 --directory public &
+python3 scripts/smoke-static.py http://127.0.0.1:9505/ dist/puppy-school.html
 ```
 
 Then a quick phone pass as a grown-up: Skills tab bottom shows the health
