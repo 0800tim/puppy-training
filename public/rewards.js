@@ -98,7 +98,7 @@
     for (const k in ticks) {
       const t = ticks[k]; if (!t || t.void) continue;
       const [date, pid, slot] = k.split("_");
-      if (!fam.some((p) => p.id === pid)) continue;
+      if (!fam.some((p) => p.id === pid) || !SLOTS.includes(slot)) continue;
       if (date < first) first = date;
       (days[date] = days[date] || {});
       (days[date][pid] = days[date][pid] || { slots: {}, n: 0 });
