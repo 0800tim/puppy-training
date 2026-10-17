@@ -415,3 +415,6 @@ button.vid{width:100%;border:1px solid var(--line);font:inherit;text-align:left;
 .due-row.soon{background:var(--sun-soft)}
 .due-row.now{background:var(--accent-soft)}
 .due-row small{color:var(--muted);white-space:nowrap}
+/* teaching */
+.card.confirm{border:1.5px solid var(--sun);background:linear-gradient(135deg,var(--surface),var(--sun-soft))}
+.row.teach select{flex:1;min-width:150px}

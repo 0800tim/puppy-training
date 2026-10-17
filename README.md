@@ -163,9 +163,10 @@ Contributions welcome, especially new skills, better videos, translations, breed
 
 **Health**: grown-ups log weigh-ins, vaccinations, worming, flea treatment and vet visits; the app draws the weight curve and says when the next vaccine, worming or weigh-in is due on the usual New Zealand timings.
 
+**Buddies and teaching**: pick a buddy in Settings and share a streak (days you both train). On any open skill, log "I taught this to…"; the learner confirms from their own phone and you both score. Badges for a 7-day buddy streak, the first confirmed lesson and the fifth.
+
 ## Roadmap
 
-- Buddy streaks between two people and co-signed "I taught my brother Sit".
 - CSV export and a printable certificate per puppy level.
 - Multi-family hosting so any family can sign up with their own PIN.
 

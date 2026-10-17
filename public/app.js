@@ -55,7 +55,7 @@ function T(str) {
 }
 
 /* ---------- state ---------- */
-const S = { settings: null, ticks: {}, logs: {}, mastery: {}, toilet: [], photo: false, scores: null, push: [], sms: false, vapid: "", social: {}, me: undefined, adultPin: false, health: [] };
+const S = { settings: null, ticks: {}, logs: {}, mastery: {}, toilet: [], photo: false, scores: null, push: [], sms: false, vapid: "", social: {}, me: undefined, adultPin: false, health: [], teach: [] };
 let store = null;
 let viewDay = new Date(today);
 let staticKey = "";
@@ -118,12 +118,15 @@ class LocalStore {
     S.settings = lsGet("pt.settings", null);
     const t = lsGet("pt.ticks", {}); S.ticks = Array.isArray(t) ? Object.fromEntries(t.map((k) => [k, { at: 0 }])) : t;
     S.logs = lsGet("pt.logs", {}); S.mastery = lsGet("pt.mastery", {}); S.toilet = lsGet("pt.toilet", []);
-    S.photo = !!lsGet("pt.photo", null); S.social = lsGet("pt.social", {}); S.health = lsGet("pt.health", []);
+    S.photo = !!lsGet("pt.photo", null); S.social = lsGet("pt.social", {}); S.health = lsGet("pt.health", []); S.teach = lsGet("pt.teach", []);
     cb();
   }
-  save() { lsSet("pt.settings", S.settings); lsSet("pt.ticks", S.ticks); lsSet("pt.logs", S.logs); lsSet("pt.mastery", S.mastery); lsSet("pt.toilet", S.toilet); lsSet("pt.social", S.social); lsSet("pt.health", S.health); this.cb(); }
+  save() { lsSet("pt.settings", S.settings); lsSet("pt.ticks", S.ticks); lsSet("pt.logs", S.logs); lsSet("pt.mastery", S.mastery); lsSet("pt.toilet", S.toilet); lsSet("pt.social", S.social); lsSet("pt.health", S.health); lsSet("pt.teach", S.teach); this.cb(); }
   async addHealth(x) { S.health.push(Object.assign({ id: Math.random().toString(16).slice(2, 14), at: Date.now() }, x)); this.save(); }
   async voidHealth(id) { S.health = S.health.filter((h) => h.id !== id); this.save(); }
+  async addTeach(skill, learner, teacher) { S.teach.push({ id: Math.random().toString(16).slice(2, 14), skill, teacher, learner, at: Date.now(), confirmed: null }); this.save(); }
+  async confirmTeach(id) { const t = S.teach.find((x) => x.id === id); if (t && !t.confirmed) t.confirmed = Date.now(); this.save(); }
+  async voidTeach(id) { S.teach = S.teach.filter((x) => x.id !== id); this.save(); }
   async setSocial(item, by, mood, on) { const L = (S.social[item] || []).filter((x) => x.by !== by); if (on !== false) L.push({ by, mood, at: Date.now() }); S.social[item] = L; this.save(); }
   async saveSettings(x) { S.settings = x; this.save(); }
   async setTick(k, on, extra) { if (on) S.ticks[k] = Object.assign({ at: Date.now() }, extra || {}); else delete S.ticks[k]; this.save(); }
@@ -142,7 +145,7 @@ class ServerStore {
     this.rev = j.rev;
     S.settings = j.settings || null;
     S.ticks = j.ticks || {}; S.logs = j.logs || {}; S.mastery = j.mastery || {}; S.toilet = j.toilet || [];
-    S.push = j.push || []; S.sms = !!j.sms; S.vapid = j.vapid || ""; S.social = j.social || {}; S.adultPin = !!j.adultPin; S.share = j.share || null; S.health = j.health || [];
+    S.push = j.push || []; S.sms = !!j.sms; S.vapid = j.vapid || ""; S.social = j.social || {}; S.adultPin = !!j.adultPin; S.share = j.share || null; S.health = j.health || []; S.teach = j.teach || [];
     if ("me" in j) { S.me = j.me; if (j.me && j.me !== meId) { meId = j.me; lsSet("pt.me", j.me); } }
     if (j.photo !== S.photo) { S.photo = !!j.photo; this.photoBust = Date.now(); }
     this.cb();
@@ -192,6 +195,9 @@ class ServerStore {
   makeShare() { return this.write("POST", "api/share", {}); }
   addHealth(x) { return this.write("POST", "api/healthlog", x); }
   voidHealth(id) { return this.write("DELETE", "api/healthlog/" + id); }
+  addTeach(skill, learner) { return this.write("POST", "api/teach", { skill, learner }); }
+  confirmTeach(id) { return this.write("PUT", "api/teach/" + id, {}); }
+  voidTeach(id) { return this.write("DELETE", "api/teach/" + id); }
   dropShare() { return this.write("DELETE", "api/share"); }
   addToilet(x) { return this.write("POST", "api/toilet", x); }
   voidToilet(id) { return this.write("DELETE", "api/toilet/" + id); }
@@ -411,6 +417,7 @@ function renderSettings(firstRun) {
         el("input", { type: "text", id: "fam-" + p.id, maxlength: "20", placeholder: "Name", value: p.name, "aria-label": "Name", oninput: (e) => (p.name = e.target.value) }),
         el("div", { class: "row" }, [kindSel(p), p.kind === "kid" ? ageSel(p) : null,
           el("label", { class: "target" }, ["Goal ", el("input", { type: "number", min: "1", max: "30", value: p.target || C.kinds[p.kind].target, "aria-label": "Sessions a week", oninput: (e) => { p.target = Number(e.target.value); p.touched = true; } }), " a week"])]),
+        el("div", { class: "row" }, [el("label", { class: "target" }, ["Buddy ", el("select", { "aria-label": "Buddy for " + (p.name || "this person"), onchange: (e) => (p.buddy = e.target.value) }, [el("option", { value: "", text: "none" }), ...fam.filter((o) => o.id !== p.id && o.name).map((o) => el("option", { value: o.id, selected: p.buddy === o.id, text: o.name }))])])]),
         (isAdult(me()) || !family().some(isAdult)) && store.mode === "server" ? el("div", { class: "row" }, [
           el("input", { type: "tel", placeholder: "Mobile (for texts)", value: p.phone || "", "aria-label": "Mobile number", style: "flex:1;min-width:150px", oninput: (e) => (p.phone = e.target.value) }),
           el("label", { class: "target" }, [el("input", { type: "checkbox", checked: !!p.sms, onchange: (e) => (p.sms = e.target.checked) }), " text " + (p.name || "them")])]) : null
@@ -435,7 +442,7 @@ function renderSettings(firstRun) {
     input.addEventListener("input", draw); draw(); return out;
   };
   const save = el("button", { class: "btn", type: "button", text: firstRun ? "Start training" : "Save", onclick: async () => {
-    const famClean = fam.map((p) => ({ id: p.id, name: p.name.trim().slice(0, 20), kind: p.kind, age: p.age || "", target: Math.max(1, Math.min(30, Number(p.target) || C.kinds[p.kind].target)), phone: p.phone || "", sms: !!p.sms })).filter((p) => p.name);
+    const famClean = fam.map((p) => ({ id: p.id, name: p.name.trim().slice(0, 20), kind: p.kind, age: p.age || "", target: Math.max(1, Math.min(30, Number(p.target) || C.kinds[p.kind].target)), phone: p.phone || "", sms: !!p.sms, buddy: p.buddy || "" })).filter((p) => p.name);
     if (!famClean.length) { toast("Add at least one person"); return; }
     const next = { puppy: { name: name.value.trim().slice(0, 24), sex: sex.value, breed: breed.value.trim().slice(0, 80), born: born.value }, start: start.value || iso(today), family: famClean };
     await safe(async () => { await store.saveSettings(next); toast("Saved"); if (!me()) renderWho(); else show(firstRun ? "today" : current); });
@@ -476,7 +483,7 @@ function renderSettings(firstRun) {
     P.append(
       el("div", { class: "eyebrow", text: "Who's training" }),
       el("div", { class: "card", style: "display:grid;gap:10px" }, [famBox, addBtn,
-        el("p", { class: "note", text: "Everyone gets three 5-minute sessions a day on the chart and does every skill. The weekly goal is what your streak and progress are measured against: kids 21, grown-ups 10 by default." })]),
+        el("p", { class: "note", text: "Everyone gets three 5-minute sessions a day on the chart and does every skill. The weekly goal is what your streak and progress are measured against: kids 21, grown-ups 10 by default. A buddy is someone whose streak you share: days you both train count." })]),
       el("div", { class: "row" }, [save, firstRun ? null : el("button", { class: "btn ghost", type: "button", text: "Cancel", onclick: () => show(current) })])
     );
   }
@@ -659,6 +666,13 @@ function renderToday() {
     P.append(el("div", { class: "card" }, [el("b", { text: "Whose phone is this?" }), el("p", { class: "note", text: "Pick yourself so your sessions count for you." }), el("button", { class: "btn", type: "button", text: "Pick me", onclick: renderWho })]));
   }
 
+  // "X says they taught you Y": confirm from your own phone
+  if (m && isToday) {
+    const pending = (S.teach || []).filter((t) => t.learner === m.id && !t.confirmed);
+    pending.forEach((t) => { const sk = skillById(t.skill), tch = person(t.teacher); if (!sk || !tch) return;
+      P.append(el("div", { class: "card confirm" }, [el("div", { class: "row", style: "justify-content:space-between" }, [el("div", {}, [el("b", { text: tch.name + " says they taught you " + T(sk.nm) }), el("small", { class: "muted", text: "True? You both get points." })]),
+        el("div", { class: "row", style: "flex-wrap:nowrap" }, [el("button", { class: "btn", type: "button", text: "Yes", onclick: () => safe(() => store.confirmTeach(t.id), "+" + C.points.learn + " for you, +" + C.points.teach + " for " + tch.name) }), el("button", { class: "btn ghost", type: "button", text: "No", onclick: () => safe(() => store.voidTeach(t.id)) })])])])); });
+  }
   // everyone
   const people = el("div", { class: "people" });
   family().forEach((p) => {
@@ -828,7 +842,9 @@ function renderPack() {
       el("div", { class: "stats" }, [
         el("span", { class: "stat", title: "Streak" }, [icon("flame"), String(ps.streak)]),
         el("span", { class: "stat", title: "Freezes left this week" }, [icon("snow"), String(ps.freezesLeft)]),
-        el("span", { class: "stat", title: "Badges" }, [icon("medal"), String(ps.badges.length)])]),
+        el("span", { class: "stat", title: "Badges" }, [icon("medal"), String(ps.badges.length)]),
+        ps.buddy ? el("span", { class: "stat", title: "Buddy streak with " + (person(ps.buddy.with) || { name: "?" }).name }, [icon("pack"), String(ps.buddy.streak)]) : null,
+        ps.taught ? el("span", { class: "stat", title: "Skills taught" }, [icon("grad"), String(ps.taught)]) : null]),
       el("div", { class: "wk" }, [bar(ps.weekPct, "", p.name + "'s week against goal"), el("small", { class: "muted", text: ps.weekSessions + " of " + ps.target + " this week (" + ps.weekPct + "%) · best week " + ps.bestWeek })]),
       el("div", { class: "lvl" }, [bar(ps.level.pct, "thin", p.name + "'s progress to the next level"), el("small", { class: "muted", text: ps.level.next ? (ps.level.next - ps.points) + " pts to " + ps.level.nextName : "Top level" })])
     ]);
@@ -939,6 +955,16 @@ function skillCard(s) {
       } })]));
       body.append(el("small", { class: "note", text: "Confirm when " + T("she") + " hits the goal above with you, and someone else saw it. Big points, so it needs a witness." }));
     }
+  }
+  if (m && st.open && family().length > 1) {
+    const others = family().filter((p) => p.id !== m.id);
+    const who = el("select", { "aria-label": "Who did you teach?" }, [el("option", { value: "", text: "I taught this to…" }), ...others.map((p) => el("option", { value: p.id, text: p.name }))]);
+    const mine = (S.teach || []).filter((t) => t.skill === s.id && t.teacher === m.id);
+    body.append(el("div", { class: "row teach" }, [who, el("button", { class: "btn ghost", type: "button", text: "Log it", onclick: async () => {
+      if (!who.value) { toast("Pick who you taught"); return; }
+      await safe(async () => { await store.addTeach(s.id, who.value, m.id); toast(person(who.value).name + " confirms it from their phone, then you both score"); who.value = ""; });
+    } })]));
+    if (mine.length) body.append(el("small", { class: "note", text: "Taught to " + mine.map((t) => (person(t.learner) ? person(t.learner).name : "?") + (t.confirmed ? " ✓" : " (waiting)")).join(", ") }));
   }
   if (s.help) body.append(el("button", { class: "chip", text: "Full biting plan →", onclick: () => show("help") }));
   body.append(vids(s.v));
