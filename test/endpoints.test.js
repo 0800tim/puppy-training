@@ -132,10 +132,12 @@ test("visitor card: grown-ups make and revoke a link; the page is public by link
     const base = "http://127.0.0.1:" + app.server.address().port;
     const page = await fetch(base + "/api/visitor/" + made.json.share.token);
     assert.equal(page.status, 200);
+    assert.match(page.headers.get("x-robots-tag") || "", /noindex/, "noindex header as well as the meta tag");
     const html = await page.text();
     assert.match(html, /Looking after Pip/); assert.match(html, /noindex/); assert.match(html, /Say it once/);
     assert.ok(!/Kid<|Mum</.test(html), "no family names on the card");
-    assert.equal((await fetch(base + "/api/visitor/" + "0".repeat(24))).status, 404);
+    const miss = await fetch(base + "/api/visitor/" + "0".repeat(24));
+    assert.equal(miss.status, 404); assert.match(miss.headers.get("x-robots-tag") || "", /noindex/);
     const again = await app.call("POST", "/api/share", {}, mum);
     assert.notEqual(again.json.share.token, made.json.share.token, "a new link replaces the old one");
     assert.equal((await fetch(base + "/api/visitor/" + made.json.share.token)).status, 404, "old link dead");

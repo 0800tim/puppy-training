@@ -159,6 +159,8 @@ function createApp(opts = {}) {
   }
 
   /* ---------- the visitor card: one page for grandparents and sitters, no PIN, by link only ---------- */
+  // The page carries a noindex meta tag; the header says the same to crawlers that never parse the body, on both the card and the "turned off" page.
+  const VISITOR_HEADERS = { "Content-Type": "text/html; charset=utf-8", "X-Robots-Tag": "noindex, nofollow" };
   const esc = (x) => String(x).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   function visitorHtml(st) {
     const name = st ? esc(st.puppy.name || "the puppy") : "";
@@ -221,8 +223,8 @@ function createApp(opts = {}) {
     if (p === "/api/health") return send(res, 200, { app: "puppy-training", version: VERSION, pin: true });
     if ((m = p.match(/^\/api\/visitor\/([a-f0-9]{24})$/)) && req.method === "GET") {
       const tok = Buffer.from(m[1]), real = Buffer.from(db.share ? db.share.token : "x".repeat(24));
-      if (!db.settings || tok.length !== real.length || !crypto.timingSafeEqual(tok, real)) return send(res, 404, visitorHtml(null), { "Content-Type": "text/html; charset=utf-8" });
-      return send(res, 200, visitorHtml(db.settings), { "Content-Type": "text/html; charset=utf-8" });
+      if (!db.settings || tok.length !== real.length || !crypto.timingSafeEqual(tok, real)) return send(res, 404, visitorHtml(null), VISITOR_HEADERS);
+      return send(res, 200, visitorHtml(db.settings), VISITOR_HEADERS);
     }
 
     if (p === "/api/login" && req.method === "POST") {
