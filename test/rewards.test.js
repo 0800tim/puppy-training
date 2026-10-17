@@ -90,3 +90,81 @@ test("missions rotate through open skills and cover everyone", () => {
   for (let i = 0; i < 7; i++) { const mm = R.missions({ settings, ticks: {}, mastery: {} }, C, R.addDays("2026-10-16", i)); ["am", "pm", "ev"].forEach((s) => seen.add(mm.a[s].skill)); }
   assert.equal(seen.size, open.length, "a week covers every open skill for one person");
 });
+
+/* ---------- edge cases (burn round 5) ---------- */
+const fam2 = [{ id: "a", name: "Ava", kind: "kid", target: 21 }, { id: "d", name: "Dad", kind: "adult", target: 10 }, { id: "b", name: "Ben", kind: "kid", target: 21 }];
+const settings2 = { puppy: { name: "Pip", sex: "girl", born: "2026-08-14", breed: "" }, start: "2026-10-05", family: fam2 };
+const fresh = (ticks, extra) => Object.assign({ settings: settings2, ticks: ticks || {}, logs: {}, mastery: {}, toilet: [] }, extra || {});
+
+test("podium: percent of your own goal, so a grown-up on 10 can beat a kid on 21", () => {
+  const ticks = {};
+  // week of Mon 12 Oct: Dad does 6 of 10 (60%), Ava does 9 of 21 (43%), Ben 0
+  for (let i = 0; i < 6; i++) tick(ticks, R.addDays("2026-10-12", i), "d", "pm", 16);
+  for (let i = 0; i < 3; i++) ["am", "pm", "ev"].forEach((s) => tick(ticks, R.addDays("2026-10-12", i), "a", s, s === "am" ? 7 : s === "pm" ? 16 : 19));
+  const S = R.compute(fresh(ticks), C, { today: "2026-10-18" }); // Sunday
+  assert.equal(S.people.d.weekPct, 60); assert.equal(S.people.a.weekPct, 43); assert.equal(S.people.b.weekPct, 0);
+  const order = Object.values(S.people).sort((x, y) => y.weekPct - x.weekPct).map((p) => p.id);
+  assert.deepEqual(order, ["d", "a", "b"]);
+  assert.equal(S.people.a.weekSessions, 9); assert.equal(S.people.a.points > S.people.d.points, true, "raw points still favour Ava, which is why the podium does not use them");
+});
+
+test("Sunday-night reset: on Monday the week starts from zero while best week and streaks carry over", () => {
+  const ticks = {};
+  for (let i = 0; i < 7; i++) tick(ticks, R.addDays("2026-10-12", i), "a", "pm", 16); // Mon 12 to Sun 18
+  let S = R.compute(fresh(ticks), C, { today: "2026-10-18" });
+  assert.equal(S.people.a.weekSessions, 7); assert.equal(S.people.a.weekPct, 33);
+  S = R.compute(fresh(ticks), C, { today: "2026-10-19" }); // Monday, nothing yet
+  assert.equal(S.people.a.weekSessions, 0); assert.equal(S.people.a.weekPct, 0);
+  assert.equal(S.people.a.bestWeek, 7, "best week survives the reset");
+  assert.equal(S.people.a.streak, 7, "streak survives: today is empty but not over");
+  assert.equal(S.people.a.atRisk, true);
+  assert.equal(S.pack.weekSessions, 0);
+});
+
+test("pack streak counts only days when every single person trained", () => {
+  const ticks = {};
+  ["2026-10-14", "2026-10-15", "2026-10-16"].forEach((d) => fam2.forEach((p) => tick(ticks, d, p.id, "pm", 16)));
+  tick(ticks, "2026-10-17", "a", "pm", 16); tick(ticks, "2026-10-17", "d", "pm", 16); // Ben misses Saturday
+  let S = R.compute(fresh(ticks), C, { today: "2026-10-17" });
+  assert.equal(S.pack.streak, 3, "Saturday is not over, so the run up to Friday still counts");
+  assert.equal(S.pack.days, 3);
+  S = R.compute(fresh(ticks), C, { today: "2026-10-18" });
+  assert.equal(S.pack.streak, 0, "by Sunday the broken Saturday ends the run");
+  assert.equal(S.pack.best, 3);
+  assert.equal(S.people.a.points, 4 * 10 + 3 * C.points.packDay, "pack days pay everyone");
+});
+
+test("mastery: three different people with witnesses, never the same person twice, never self-witnessed", () => {
+  const votes = (L) => ({ sit: { done: L }, yes: { done: [{ by: "a", witness: "d", at: 1 }, { by: "d", witness: "a", at: 1 }, { by: "b", witness: "a", at: 1 }] } });
+  let S = R.compute(fresh({}, { mastery: votes([{ by: "a", witness: "d", at: 1 }, { by: "a", witness: "b", at: 2 }]) }), C, { today: "2026-10-18" });
+  assert.equal(S.skills.sit.votes, 1, "two votes from Ava count once");
+  assert.equal(S.skills.sit.mastered, false);
+  S = R.compute(fresh({}, { mastery: votes([{ by: "a", witness: "d", at: 1 }, { by: "d", witness: "a", at: 2 }, { by: "b", witness: "a", at: 3 }]) }), C, { today: "2026-10-18" });
+  assert.equal(S.skills.sit.mastered, true);
+  assert.equal(S.skills.down.open, true, "mastered Sit opens Down");
+  const two = { settings: Object.assign({}, settings2, { family: fam2.slice(0, 2) }), ticks: {}, logs: {}, toilet: [], mastery: votes([{ by: "a", witness: "d", at: 1 }, { by: "d", witness: "a", at: 2 }]) };
+  assert.equal(R.compute(two, C, { today: "2026-10-18" }).skills.sit.mastered, true, "a family of two needs two");
+  // the server refuses self-witness; the engine ignores nothing, so a voided vote must not count
+  S = R.compute(fresh({}, { mastery: votes([{ by: "a", witness: "d", at: 1, void: true }]) }), C, { today: "2026-10-18" });
+  assert.equal(S.skills.sit.votes, 0);
+});
+
+test("welfare cap: three slots a day is the ceiling, so points cannot be farmed", () => {
+  const ticks = {};
+  tick(ticks, "2026-10-16", "a", "am", 7); tick(ticks, "2026-10-16", "a", "pm", 16); tick(ticks, "2026-10-16", "a", "ev", 19);
+  ticks["2026-10-16_a_xx"] = { at: at("2026-10-16", 12), by: "a" }; // not a real slot: the server refuses it, the engine ignores it
+  const S = R.compute(fresh(ticks), C, { today: "2026-10-16" });
+  assert.equal(S.people.a.today, 3);
+  assert.equal(S.people.a.points, 3 * C.points.session + C.points.fullDay);
+  assert.equal(S.puppy.sessions, 3);
+});
+
+test("regression: the puppy's age in weeks does not lose a week across daylight saving", () => {
+  // NZ clocks went forward on 27 Sep 2026; 14 Aug to 16 Oct is 63 days exactly, so 9 weeks, not 8
+  const S = R.compute(fresh({}), C, { today: "2026-10-16" });
+  assert.equal(S.toilet.ageWeeks, 9);
+  const S2 = R.compute(fresh({}), C, { today: "2026-10-17" });
+  assert.equal(S2.toilet.ageWeeks, 9);
+  const S3 = R.compute(fresh({}), C, { today: "2026-10-23" });
+  assert.equal(S3.toilet.ageWeeks, 10);
+});
