@@ -152,6 +152,8 @@ test("health log: grown-ups record weights, vaccines and worming; entries can be
     assert.equal((await app.call("POST", "/api/healthlog", { kind: "weight", date: "2026-10-17", kg: 6.4 }, kid)).status, 403);
     assert.equal((await app.call("POST", "/api/healthlog", { kind: "haircut", date: "2026-10-17" }, mum)).status, 400);
     assert.equal((await app.call("POST", "/api/healthlog", { kind: "weight", date: "17/10/2026", kg: 6.4 }, mum)).status, 400);
+    assert.equal((await app.call("POST", "/api/healthlog", { kind: "weight", date: "2026-02-30", kg: 6.4 }, mum)).status, 400, "not a real day");
+    assert.equal((await app.call("POST", "/api/healthlog", { kind: "vet", date: "1999-12-31" }, mum)).status, 400, "out of range");
     assert.equal((await app.call("POST", "/api/healthlog", { kind: "weight", date: "2026-10-17", kg: "lots" }, mum)).status, 400);
     const w = await app.call("POST", "/api/healthlog", { kind: "weight", date: "2026-10-17", kg: 6.449 }, mum);
     assert.equal(w.status, 200); assert.equal(w.json.health[0].kg, 6.45); assert.equal(w.json.health[0].by, "a");

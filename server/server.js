@@ -41,6 +41,8 @@ const CSP = [
 
 const TICK_RE = /^\d{4}-\d{2}-\d{2}_[A-Za-z0-9]{1,24}_(am|pm|ev)$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+// A date that is the right shape and a real calendar day in this century (2026-02-30 and 2026-13-01 are not).
+const realDate = (s) => { if (!DATE_RE.test(s) || s < "2000-01-01" || s > "2099-12-31") return false; const d = new Date(s + "T00:00:00Z"); return !isNaN(d) && d.toISOString().slice(0, 10) === s; };
 const KINDS = new Set(["kid", "adult"]);
 const AGES = new Set(["", "5-7", "8-9", "10-11", "12-14", "15+"]);
 const SKILL_IDS = new Set(CONTENT.skills.map((s) => s.id));
@@ -388,7 +390,7 @@ function createApp(opts = {}) {
       if (!isAdult) return send(res, 403, { error: "Grown-ups log health" });
       const body = await readJson(req);
       if (!HEALTH_KINDS.has(body.kind)) return send(res, 400, { error: "Bad kind" });
-      if (!DATE_RE.test(body.date)) return send(res, 400, { error: "Bad date" });
+      if (!realDate(body.date)) return send(res, 400, { error: "Bad date" });
       const kg = body.kind === "weight" ? Number(body.kg) : undefined;
       if (body.kind === "weight" && !(kg > 0 && kg < 120)) return send(res, 400, { error: "Weight in kg, please" });
       const entry = { id: crypto.randomBytes(6).toString("hex"), at: now(), date: body.date, kind: body.kind, note: typeof body.note === "string" ? body.note.trim().slice(0, 80) : "", by: me.id };
