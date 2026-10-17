@@ -555,11 +555,11 @@ const PUPPY_CONTENT = {
   /* ---------- health: NZ timings (Totally Vets, Petstock NZ; see hivemind research digest) ---------- */
   health: {
     kinds: [["vaccine", "Vaccination"], ["worm", "Worming"], ["flea", "Flea treatment"], ["vet", "Vet visit"], ["weight", "Weigh-in"]],
-    vaccines: [[8, "First core vaccine (distemper, hepatitis, parvo)"], [12, "Second core vaccine; leptospirosis optional"], [16, "Third core vaccine; walks on public ground about 10 days after"], [52, "Booster, 6 to 12 months after the course, then as the vet advises"]],
+    vaccines: [[8, "First core vaccine (distemper, hepatitis, parvo); some clinics start at 6 weeks"], [12, "Second core vaccine; ask about leptospirosis (two doses, 3 to 4 weeks apart)"], [16, "Last puppy vaccine: 16 weeks or later (WSAVA 2024), though some NZ clinics finish at 12. Public walks 1 to 2 weeks after, when your vet says"], [52, "First booster: NZ clinics usually say 12 months after the course; WSAVA says it can be from 6 months old. Ask your vet"]],
     wormRule: "Every 2 weeks until 12 weeks, monthly until 6 months, then every 3 months. Weigh before each dose.",
     wormNext: (ageWeeks) => (ageWeeks < 12 ? 14 : ageWeeks < 26 ? 30 : 91),
-    weightNote: "Weigh every 2 to 4 weeks until 6 months. A lean puppy has fewer joint problems: you should see a waist from above and feel the ribs easily. Crossing growth bands up or down is a vet conversation, not a diet.",
-    note: "Dates here are what NZ clinics usually do. Your vet's card wins. Nothing in this app is medical advice."
+    weightNote: "Weigh every fortnight or so until 6 months (clinics do it for free, and bathroom scales work: you, then you holding her). A lean puppy has fewer joint problems: you should see a waist from above and feel the ribs easily. Crossing growth bands up or down is a vet conversation, not a diet.",
+    note: "Dates here are the schedule most NZ clinics use; clinics differ by a week or two, and some finish puppy vaccines at 12 weeks. Your vet's card wins. Nothing in this app is medical advice. Sources: docs/HEALTH-TIMINGS-REVIEW.md."
   }
 };
 if (typeof module === "object" && module.exports) module.exports = PUPPY_CONTENT; else window.PUPPY_CONTENT = PUPPY_CONTENT;
