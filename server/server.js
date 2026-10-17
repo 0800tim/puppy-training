@@ -135,7 +135,7 @@ function createApp(opts = {}) {
   if (fs.existsSync(vapidFile)) vapid = JSON.parse(fs.readFileSync(vapidFile, "utf8"));
   else { vapid = PUSH.generateVapidKeys(); fs.writeFileSync(vapidFile, JSON.stringify(vapid), { mode: 0o600 }); }
   const smsSender = opts.sms === null ? null : (opts.sms || NOTIFY.makeSmsSender(process.env));
-  const notifier = opts.noScheduler ? null : NOTIFY.createNotifier({ db, C: CONTENT, R: REWARDS, keys: vapid, subject: pushSubject, log, persist, sendPush: PUSH.sendPush, sendSms: smsSender || (async () => { throw new Error("no SMS gateway configured"); }), now: opts.now ? () => new Date(now()) : undefined });
+  const notifier = opts.noScheduler ? null : NOTIFY.createNotifier({ db, C: CONTENT, R: REWARDS, keys: vapid, subject: pushSubject, log, persist, sendPush: opts.sendPush || PUSH.sendPush, sendSms: smsSender || (async () => { throw new Error("no SMS gateway configured"); }), now: opts.now ? () => new Date(now()) : undefined });
   const member = (id) => (db.settings && db.settings.family.find((m) => m.id === id)) || null;
 
   function cleanSettings(x) {
