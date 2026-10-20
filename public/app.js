@@ -137,7 +137,7 @@ class LocalStore {
   async voidToilet(id) { const t = S.toilet.find((x) => x.id === id); if (t) t.void = true; this.save(); }
   async setPhoto(data) { if (data) lsSet("pt.photo", data); else { try { localStorage.removeItem("pt.photo"); } catch (e) {} } S.photo = !!data; this.cb(); }
   photoUrl() { return lsGet("pt.photo", null); }
-  exportJson() { return { settings: S.settings, ticks: S.ticks, logs: S.logs, mastery: S.mastery, toilet: S.toilet }; }
+  exportJson() { return { settings: S.settings, ticks: S.ticks, logs: S.logs, mastery: S.mastery, toilet: S.toilet, social: S.social || {}, health: S.health || [], teach: S.teach || [] }; }
 }
 class ServerStore {
   constructor() { this.mode = "server"; this.rev = -1; }
@@ -204,7 +204,7 @@ class ServerStore {
   voidToilet(id) { return this.write("DELETE", "api/toilet/" + id); }
   setPhoto(data) { return data ? this.write("PUT", "api/photo", { data }) : this.write("DELETE", "api/photo"); }
   photoUrl() { return S.photo ? "api/photo?v=" + (this.photoBust || 0) : null; }
-  exportJson() { return { settings: S.settings, ticks: S.ticks, logs: S.logs, mastery: S.mastery, toilet: S.toilet }; }
+  exportJson() { return { settings: S.settings, ticks: S.ticks, logs: S.logs, mastery: S.mastery, toilet: S.toilet, social: S.social || {}, health: S.health || [], teach: S.teach || [] }; }
   async subscribePush(subscription, pid, prefs, label) { const r = await api("POST", "api/push/subscribe", { subscription, prefs, label }); if (!r.ok) throw new Error((r.json && r.json.error) || "save failed"); this.apply(r.json); return r.json.subId; }
   setPushPrefs(id, prefs, by) { return this.write("PUT", "api/push/" + id, { prefs, by }); }
   deletePush(id) { return this.write("DELETE", "api/push/" + id); }
@@ -767,6 +767,7 @@ function exportCsv() {
   C.skills.forEach((sk) => { const v = ((S.mastery[sk.id] || {}).done || []).filter((x) => !x.void); v.forEach((x) => rows.push(["skill_confirmed", iso(new Date(x.at)), who(x.by), sk.nm, "witness: " + who(x.witness), who(x.by), when(x.at)])); });
   Object.keys(S.social || {}).forEach((key) => { const [g, i] = key.split(":"); const grp = C.socialGroups.find((x) => x.id === g); const item = grp && grp.items[Number(i)]; (S.social[key] || []).filter((x) => !x.void).forEach((x) => rows.push(["socialising", iso(new Date(x.at)), who(x.by), item || key, x.mood, who(x.by), when(x.at)])); });
   (S.health || []).forEach((h) => rows.push(["health", h.date, "", h.kind, h.kg != null ? h.kg : h.note || "", who(h.by), when(h.at)]));
+  (S.teach || []).filter((x) => !x.void).forEach((x) => { const sk = skillById(x.skill); rows.push(["teaching", iso(new Date(x.at)), who(x.teacher), (sk ? sk.nm : x.skill) + " taught to " + who(x.learner), x.confirmed ? "confirmed " + iso(new Date(x.confirmed)) : "waiting", who(x.teacher), when(x.at)]); });
   return rows.map((r) => r.map(q).join(",")).join("\r\n") + "\r\n";
 }
 

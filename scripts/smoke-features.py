@@ -55,6 +55,12 @@ async def main():
         assert await pg.locator(".cert-sheet").count() == 0, "escape closes it"
         await pg.locator("#gear").click(); await pg.wait_for_timeout(400)
         assert await pg.locator("#p-settings").get_by_role("button", name="Export CSV").count() == 1, "CSV button"
+        keys = await pg.evaluate("Object.keys(store.exportJson())")
+        for k in ["settings", "ticks", "logs", "mastery", "toilet", "social", "health", "teach"]:
+            assert k in keys, "JSON export holds " + k + ": " + str(keys)
+        csv = await pg.evaluate("exportCsv()")
+        assert '"teaching"' in csv and "taught to Ben" in csv, "CSV has the teaching row: " + csv[-300:]
+        assert '"health"' in csv and "6.4" in csv, "CSV has the health row"
         print("notes:", errs); assert not [e for e in errs if not e.startswith("404 ")], "page errors: " + str(errs)
         await ctx.close(); await b.close()
         print("ok: health, teaching, certificate and CSV degrade cleanly with no server")

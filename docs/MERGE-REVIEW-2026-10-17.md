@@ -151,10 +151,9 @@ Buddy and teaching
 
 Export and certificate
 
-- `exportJson()` still exports settings, ticks, logs, mastery and toilet
-  only. It has never included `social`, and now also skips `health` and
-  `teach`. The CSV covers health. Suggest a small follow-up: add the three
-  keys to `exportJson` and a `teaching` row type to `exportCsv`.
+- `exportJson()` exported settings, ticks, logs, mastery and toilet only;
+  closed on `feat/export-gaps` (20 Oct): it now carries `social`, `health`
+  and `teach` as well, and the CSV has a `teaching` row type.
 - The certificate reads `sc.puppy.sessions`, `mastered`, `total` and
   `sc.calmDays`, all present in `rewards.js`. Icons used by all three
   branches (shield, leaf, target, pack, grad, crown, paw) exist in the
