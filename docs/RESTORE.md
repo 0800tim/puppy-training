@@ -53,12 +53,17 @@ Replace `prod` with the slot you are restoring. The unit names are `puppy-traini
 
 - **`store.json` only (same secret and vapid):** nothing. Phones stay unlocked, reminders keep working. Anything ticked after the backup time is gone.
 - **`secret.key` replaced:** every phone is signed out and asks for the PIN, then "pick yourself" again. Reminders keep working (subscriptions are in `store.json`, keys in `vapid.json`).
-- **`vapid.json` replaced or missing:** the server generates a new key pair on start. Every existing push subscription is now signed with the wrong key; the push services reject them, the notifier removes them as they fail, and each phone has to turn reminders on again in Settings. Avoid this by restoring `vapid.json` with the store.
+- **`vapid.json` missing, with phones subscribed:** since 20 October 2026 the server does **not** make a new key pair in that case. It starts with push paused, logs `vapid.json missing with N phone(s) subscribed: push is PAUSED`, answers 503 to "turn reminders on" and the test button, and keeps every subscription in `store.json`. Put `vapid.json` back from the backup, restart the unit by name, and reminders resume with no phone touched. Only a store with no subscriptions at all gets fresh keys.
+- **`vapid.json` replaced with a different pair:** the old behaviour applies: Every existing push subscription is now signed with the wrong key; the push services reject them, the notifier removes them as they fail, and each phone has to turn reminders on again in Settings. Avoid this by restoring `vapid.json` with the store.
 - **`.env` lost:** recreate it (`deploy/puppy-training.env.example` lists the variables). A different `PUPPY_PIN` signs every phone out. If `SESSION_SECRET` was set in `.env` rather than `secret.key`, it must be the same value or every phone is signed out.
 
 ## Moving a slot to another machine
 
 Copy the slot folder's `data/` (all four files) and `.env`, clone the repo at the same commit, set up the unit and tunnel as in `deploy/`, start, and change DNS. Phones carry on; the cookies are bound to the secret and the PIN, not the host.
+
+## If `store.json` will not parse
+
+Since 20 October 2026 an unreadable `store.json` (half-written, disk full, hand-edited) is copied to `store.json.corrupt-<timestamp>` in the same folder, mode 600, before the server starts fresh, and the log says so. The next write replaces `store.json` but the copy stays. To recover: stop the unit, look at the copy (usually a truncated file; the daily backup in `/srv/backups/puppy-training` is the better source), put the good file back as `store.json`, start the unit. The same copy-aside happens to a `vapid.json` that will not parse. Both files are written with mode 600 and an existing `store.json` is set to 600 on start, because the chart holds names and phone numbers.
 
 ## Checking a backup without restoring
 

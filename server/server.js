@@ -122,22 +122,44 @@ function createApp(opts = {}) {
   /* ---------- store ---------- */
   const storeFile = path.join(dataDir, "store.json");
   let db = { rev: 1, settings: null, ticks: {}, logs: {}, mastery: {}, toilet: [], push: [], sent: null, social: {}, share: null, health: [], teach: [] };
-  if (fs.existsSync(storeFile)) { try { db = Object.assign(db, JSON.parse(fs.readFileSync(storeFile, "utf8"))); } catch (e) { log("store.json unreadable, starting fresh:", e.message); } }
+  // An unreadable store is copied aside before anything else happens, so the next write cannot replace the family's
+  // chart with an empty one. Refusing to start would crash-loop under Restart=always, so we start fresh and shout.
+  const stamp = () => new Date().toISOString().replace(/[:.]/g, "-");
+  const setAside = (file, why) => {
+    const aside = file + ".corrupt-" + stamp();
+    try { fs.copyFileSync(file, aside); fs.chmodSync(aside, 0o600); } catch (e2) { log("could not copy", file, "aside:", e2.message); return null; }
+    log(path.basename(file), "unreadable (" + why + "). Copied to", path.basename(aside) + ". Starting fresh; see docs/RESTORE.md.");
+    return aside;
+  };
+  if (fs.existsSync(storeFile)) {
+    try { fs.chmodSync(storeFile, 0o600); } catch {}
+    try { db = Object.assign(db, JSON.parse(fs.readFileSync(storeFile, "utf8"))); } catch (e) { setAside(storeFile, e.message); }
+  }
   function persist(bump = true) {
     if (bump) db.rev++;
     const tmp = storeFile + "." + process.pid + ".tmp";
-    fs.writeFileSync(tmp, JSON.stringify(db));
+    fs.writeFileSync(tmp, JSON.stringify(db), { mode: 0o600 }); // the chart holds names and phone numbers
     fs.renameSync(tmp, storeFile);
   }
   const photoFile = path.join(dataDir, "photo.jpg");
   const stateOut = () => ({ rev: db.rev, settings: db.settings, ticks: db.ticks, logs: db.logs, mastery: db.mastery, toilet: db.toilet.slice(-300), social: db.social || {}, health: (db.health || []).filter((h) => !h.void), photo: fs.existsSync(photoFile), today: localToday(),
     teach: (db.teach || []).filter((t) => !t.void).slice(-200),
-    push: (db.push || []).map((s) => ({ id: s.id, pid: s.pid, prefs: s.prefs || {}, created: s.created, label: s.label || "" })), sms: !!smsSender, vapid: vapid.publicKey, share: db.share ? { token: db.share.token, created: db.share.created } : null });
+    push: (db.push || []).map((s) => ({ id: s.id, pid: s.pid, prefs: s.prefs || {}, created: s.created, label: s.label || "" })), sms: !!smsSender, vapid: pushReady ? vapid.publicKey : "", share: db.share ? { token: db.share.token, created: db.share.created } : null });
   /* ---------- push keys, notifier ---------- */
+  // The push key pair signs every reminder. Minting a new pair while phones are subscribed to the old one kills every
+  // subscription, so with subscriptions on file and no readable vapid.json we run with push paused instead: the
+  // subscriptions stay in the store and come back to life when vapid.json is restored (docs/RESTORE.md).
   const vapidFile = path.join(dataDir, "vapid.json");
-  let vapid;
-  if (fs.existsSync(vapidFile)) vapid = JSON.parse(fs.readFileSync(vapidFile, "utf8"));
-  else { vapid = PUSH.generateVapidKeys(); fs.writeFileSync(vapidFile, JSON.stringify(vapid), { mode: 0o600 }); }
+  let vapid = null;
+  if (fs.existsSync(vapidFile)) {
+    try { vapid = JSON.parse(fs.readFileSync(vapidFile, "utf8")); if (!vapid || !vapid.publicKey || !vapid.privateKey) throw new Error("no key pair in it"); }
+    catch (e) { vapid = null; setAside(vapidFile, e.message); }
+  }
+  if (!vapid) {
+    if ((db.push || []).length) log("vapid.json missing with", db.push.length, "phone(s) subscribed: push is PAUSED until data/vapid.json is restored from backup (docs/RESTORE.md). No new keys were made.");
+    else { vapid = PUSH.generateVapidKeys(); fs.writeFileSync(vapidFile, JSON.stringify(vapid), { mode: 0o600 }); }
+  }
+  const pushReady = !!vapid;
   const smsSender = opts.sms === null ? null : (opts.sms || NOTIFY.makeSmsSender(process.env));
   const notifier = opts.noScheduler ? null : NOTIFY.createNotifier({ db, C: CONTENT, R: REWARDS, keys: vapid, subject: pushSubject, log, persist, sendPush: opts.sendPush || PUSH.sendPush, sendSms: smsSender || (async () => { throw new Error("no SMS gateway configured"); }), now: opts.now ? () => new Date(now()) : undefined });
   const member = (id) => (db.settings && db.settings.family.find((m) => m.id === id)) || null;
@@ -339,6 +361,7 @@ function createApp(opts = {}) {
     if (p === "/api/push/subscribe" && req.method === "POST") {
       const body = await readJson(req);
       if (!me) return needMe();
+      if (!pushReady) return send(res, 503, { error: "Reminders are paused on the server until its push keys are restored. Ask whoever runs it." });
       const sub = body.subscription;
       if (!sub || typeof sub.endpoint !== "string" || sub.endpoint.length > 2048 || !/^https:\/\//.test(sub.endpoint) || !sub.keys || !sub.keys.p256dh || !sub.keys.auth) return send(res, 400, { error: "Bad subscription" });
       if (!pushHostOk(sub.endpoint)) return send(res, 400, { error: "That push service isn't one we send to" });
@@ -370,6 +393,7 @@ function createApp(opts = {}) {
       db.push = db.push.filter((s) => s.id !== m[1]); persist(); return send(res, 200, out());
     }
     if ((m = p.match(/^\/api\/push\/([a-f0-9]{12})\/test$/)) && req.method === "POST") {
+      if (!pushReady) return send(res, 503, { error: "Reminders are paused on the server until its push keys are restored." });
       const sub = (db.push || []).find((s) => s.id === m[1]);
       if (!sub) return send(res, 404, { error: "Not found" });
       if (!me) return needMe();

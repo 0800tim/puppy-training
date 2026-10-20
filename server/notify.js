@@ -69,7 +69,8 @@ function createNotifier(o) {
       db.sent = db.sent && db.sent.date === date ? db.sent : { date, by: {} };
       if (!db.settings) return;
       const scores = R.compute(db, C, { today: date });
-      const subs = (db.push || []).map((s) => Object.assign({ channel: "push" }, s));
+      // no keys (vapid.json missing, see server.js): leave the subscriptions alone and send nothing to them
+      const subs = keys ? (db.push || []).map((s) => Object.assign({ channel: "push" }, s)) : [];
       (db.settings.family || []).forEach((p) => { if (p.phone && p.sms) subs.push({ id: "sms:" + p.id, pid: p.id, channel: "sms", prefs: { on: true }, phone: p.phone }); });
       const msgs = decide(t, db, scores, subs, C, db.sent.by);
       let changed = false;
