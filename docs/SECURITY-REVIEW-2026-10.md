@@ -178,3 +178,9 @@ git checkout feat/export-certificate && npm test   # 33; CSV guard is client cod
 
 For the CSV guard, name a test person `=1+1` in Settings, Export CSV, open
 it in Sheets: the cell should read `'=1+1` as text.
+
+### Added 20 October 2026: the visitor address behind the tunnel
+
+| # | Finding | Severity | Fix on `sec/client-ip` |
+|---|---|---|---|
+| 10 | **With `TRUST_PROXY=1` the server took the first `X-Forwarded-For` entry as the visitor's address.** That entry is whatever the phone sent. Cloudflare's documented behaviour (developers.cloudflare.com, "HTTP request headers") is to *append* the connecting address to an `X-Forwarded-For` the client already sent, and cloudflared does the same (cloudflare/cloudflared issue 1426 shows `X-Forwarded-For: a,b,c,…,203.0.113.1` reaching the origin with `Cf-Connecting-Ip: 203.0.113.1`). So one phone could dodge the per-address PIN lockout by changing the header each try, and the log recorded made-up addresses. The global cap of 20 wrong PINs an hour still held. | Medium | `clientIp()` now reads `CF-Connecting-IP` first (one address, set only by the edge, which Cloudflare recommends over `X-Forwarded-For`), then the *last* `X-Forwarded-For` hop for other proxies, then the socket. Values that are not IP addresses are ignored. Without `TRUST_PROXY` both headers are ignored as before. Tests: a phone rewriting the first entry is still locked out, the log carries the edge's address, junk headers fall back to the socket, and with the flag off the headers do nothing. Also fixed: `createApp({ trustProxy: true })` was read as off (only the string "1" counted), which is why no test had exercised the proxy path. |

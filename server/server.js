@@ -20,6 +20,7 @@ const http = require("node:http");
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
+const net = require("node:net");
 const CONTENT = require("../public/content.js");
 const REWARDS = require("../public/rewards.js");
 const PUSH = require("./push.js");
@@ -63,7 +64,7 @@ function createApp(opts = {}) {
   if (!/^\d{4,8}$/.test(pin)) throw new Error("Set PUPPY_PIN to 4 to 8 digits (6 or more recommended).");
   const dataDir = path.resolve(opts.dataDir ?? process.env.DATA_DIR ?? path.join(__dirname, "..", "data"));
   const sessionDays = Number(opts.sessionDays ?? process.env.SESSION_DAYS ?? 180);
-  const trustProxy = String(opts.trustProxy ?? process.env.TRUST_PROXY ?? "") === "1";
+  const trustProxy = opts.trustProxy === true || String(opts.trustProxy ?? process.env.TRUST_PROXY ?? "") === "1";
   const limits = Object.assign({ perIp: 5, perIpWindowMs: 15 * 60e3, global: 20, globalWindowMs: 60 * 60e3 }, opts.limits || {});
   const now = opts.now || (() => Date.now());
   const log = opts.log || ((...a) => console.log(new Date().toISOString(), ...a));
@@ -185,7 +186,20 @@ function createApp(opts = {}) {
   }
 
   /* ---------- http helpers ---------- */
-  const clientIp = (req) => (trustProxy && req.headers["x-forwarded-for"] ? String(req.headers["x-forwarded-for"]).split(",")[0].trim() : req.socket.remoteAddress) || "?";
+  // Behind cloudflared (TRUST_PROXY=1) the visitor address is CF-Connecting-IP, one address, set by the edge and
+  // never by the caller. X-Forwarded-For is a chain the caller can seed: Cloudflare appends the real address at the
+  // END, so the first entry is whatever the phone sent. Taking the first entry let one phone dodge the PIN lockout
+  // by changing the header each try (docs/SECURITY-REVIEW-2026-10.md, 20 Oct). Order: CF-Connecting-IP, then the
+  // last X-Forwarded-For hop, then the socket. Anything that is not an IP address is ignored.
+  const ipOf = (v) => { const s = String(v || "").trim(); return net.isIP(s) ? s : ""; };
+  const clientIp = (req) => {
+    if (trustProxy) {
+      const cf = ipOf(req.headers["cf-connecting-ip"]); if (cf) return cf;
+      const xff = String(req.headers["x-forwarded-for"] || "").split(",").map((s) => s.trim()).filter(Boolean);
+      const last = ipOf(xff[xff.length - 1]); if (last) return last;
+    }
+    return req.socket.remoteAddress || "?";
+  };
   const isHttps = (req) => (trustProxy ? String(req.headers["x-forwarded-proto"] || "").startsWith("https") : !!req.socket.encrypted);
   function cookies(req) { const o = {}; String(req.headers.cookie || "").split(";").forEach((c) => { const i = c.indexOf("="); if (i > 0) o[c.slice(0, i).trim()] = decodeURIComponent(c.slice(i + 1).trim()); }); return o; }
   function send(res, code, body, headers = {}) {

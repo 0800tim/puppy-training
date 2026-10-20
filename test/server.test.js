@@ -217,3 +217,45 @@ test("a grown-up PIN, when set, gates picking a grown-up profile", async () => {
     assert.equal((await call("GET", "/api/state", undefined, cookie)).json.adultPin, true, "the app can tell a grown-up PIN exists");
   } finally { a.close(); base = prev; fs.rmSync(d, { recursive: true, force: true }); }
 });
+
+test("behind a proxy the lockout keys on CF-Connecting-IP or the last X-Forwarded-For hop, never on a header the phone wrote", async () => {
+  const dir3 = fs.mkdtempSync(path.join(os.tmpdir(), "pt-"));
+  const seen = [];
+  const s3 = createApp({ pin: PIN, dataDir: dir3, trustProxy: true, log: (...a) => seen.push(a.join(" ")), limits: { perIp: 2, global: 100 }, noScheduler: true });
+  await new Promise((r) => s3.listen(0, "127.0.0.1", r));
+  const b3 = "http://127.0.0.1:" + s3.address().port;
+  const login = (pin, headers) => fetch(b3 + "/api/login", { method: "POST", headers: Object.assign({ "Content-Type": "application/json" }, headers), body: JSON.stringify({ pin }) });
+  try {
+    // one phone, Cloudflare in front: it rewrites the first X-Forwarded-For entry every try, but CF-Connecting-IP stays put
+    for (let i = 0; i < 2; i++) assert.equal((await login("000000", { "cf-connecting-ip": "203.0.113.9", "x-forwarded-for": "10.0.0." + i + ", 203.0.113.9" })).status, 401);
+    assert.equal((await login(PIN, { "cf-connecting-ip": "203.0.113.9", "x-forwarded-for": "10.0.0.99, 203.0.113.9" })).status, 429, "locked out despite a fresh first entry");
+    assert.ok(seen.some((l) => l === "login failed 203.0.113.9"), "the log carries the edge's address, not the phone's header: " + seen.join(" | "));
+    assert.ok(!seen.some((l) => /10\.0\.0\./.test(l)), "no made-up address in the log");
+    // a different real visitor is not caught by that lockout
+    assert.equal((await login(PIN, { "cf-connecting-ip": "198.51.100.4" })).status, 200);
+    // no CF header (another proxy): the LAST hop counts, and the caller-seeded entries do not help
+    const s4dir = fs.mkdtempSync(path.join(os.tmpdir(), "pt-"));
+    const s4 = createApp({ pin: PIN, dataDir: s4dir, trustProxy: true, log: () => {}, limits: { perIp: 2, global: 100 }, noScheduler: true });
+    await new Promise((r) => s4.listen(0, "127.0.0.1", r));
+    const b4 = "http://127.0.0.1:" + s4.address().port;
+    const login4 = (pin, xff) => fetch(b4 + "/api/login", { method: "POST", headers: { "Content-Type": "application/json", "x-forwarded-for": xff }, body: JSON.stringify({ pin }) });
+    try {
+      assert.equal((await login4("000000", "1.1.1.1, 192.0.2.7")).status, 401);
+      assert.equal((await login4("000000", "2.2.2.2, 192.0.2.7")).status, 401);
+      assert.equal((await login4(PIN, "3.3.3.3, 192.0.2.7")).status, 429, "last hop is the identity");
+      assert.equal((await login4(PIN, "garbage, not-an-ip")).status, 200, "junk headers fall back to the socket, which is a different identity");
+    } finally { s4.close(); fs.rmSync(s4dir, { recursive: true, force: true }); }
+  } finally { s3.close(); fs.rmSync(dir3, { recursive: true, force: true }); }
+});
+
+test("without TRUST_PROXY the headers are ignored entirely", async () => {
+  const seen = [];
+  const dir5 = fs.mkdtempSync(path.join(os.tmpdir(), "pt-"));
+  const s5 = createApp({ pin: PIN, dataDir: dir5, log: (...a) => seen.push(a.join(" ")), noScheduler: true });
+  await new Promise((r) => s5.listen(0, "127.0.0.1", r));
+  try {
+    const r = await fetch("http://127.0.0.1:" + s5.address().port + "/api/login", { method: "POST", headers: { "Content-Type": "application/json", "cf-connecting-ip": "203.0.113.9", "x-forwarded-for": "203.0.113.9" }, body: JSON.stringify({ pin: "000000" }) });
+    assert.equal(r.status, 401);
+    assert.ok(seen.some((l) => l === "login failed 127.0.0.1"), seen.join(" | "));
+  } finally { s5.close(); fs.rmSync(dir5, { recursive: true, force: true }); }
+});
