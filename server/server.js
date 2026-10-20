@@ -239,7 +239,7 @@ function createApp(opts = {}) {
       const body = await readJson(req);
       if (!pinMatches(body.pin ?? "")) { recordFail(ip); log("login failed", ip); return send(res, 401, { error: "Wrong PIN" }); }
       fails.delete(ip);
-      log("login ok", ip);
+      log("login ok");
       const cookie = "pt_session=" + makeToken() + "; Path=/; HttpOnly; SameSite=Strict; Max-Age=" + Math.floor(sessionDays * 86400) + (isHttps(req) ? "; Secure" : "");
       return send(res, 200, { ok: true }, { "Set-Cookie": cookie });
     }
@@ -251,7 +251,10 @@ function createApp(opts = {}) {
     const me = member(validMe(ck.pt_me));
     const isAdult = me && me.kind === "adult";
     const hasAdult = !!(db.settings && db.settings.family.some((x) => x.kind === "adult"));
-    const out = (extra) => Object.assign(stateOut(), { me: me ? me.id : null, adultPin: !!adultPinHash }, extra || {});
+    // Phone numbers go only to grown-ups' phones once the family has a grown-up (kids see the family read-only anyway).
+    // In an all-kids family the kids are the editors, so they keep the full record or a save would wipe the numbers.
+    const forKids = (st) => (st && hasAdult && !isAdult ? Object.assign({}, st, { family: st.family.map((m) => { const c = Object.assign({}, m); delete c.phone; return c; }) }) : st);
+    const out = (extra) => Object.assign(stateOut(), { settings: forKids(db.settings), me: me ? me.id : null, adultPin: !!adultPinHash }, extra || {});
     const needMe = () => send(res, 403, { error: "Pick yourself first", code: "pick" });
 
     if (p === "/api/state" && req.method === "GET") {
@@ -270,7 +273,7 @@ function createApp(opts = {}) {
         if (!adultPinMatches(body.adultPin ?? "")) { recordFail(ip); log("adult pin failed", ip); return send(res, 403, { error: "Grown-up PIN needed", code: "adultpin" }); }
         fails.delete(ip);
       }
-      log("me", who.id, clientIp(req));
+      log("me", who.id);
       return send(res, 200, Object.assign(stateOut(), { me: who.id, adultPin: !!adultPinHash }), { "Set-Cookie": meCookie(req, who.id) });
     }
     if (p === "/api/me" && req.method === "DELETE") return send(res, 200, out({ me: null }), { "Set-Cookie": meCookie(req, null) });

@@ -8,11 +8,13 @@ mkdir -p "$DEST"
 for slot in prod demo dev; do
   case $slot in prod) SRC=/srv/projects/internal/puppy-training-prod/data;; demo) SRC=/srv/projects/internal/puppy-training-demo/data;; dev) SRC=/srv/projects/internal/puppy-training/data;; esac
   [ -d "$SRC" ] || continue
-  [ -f "$SRC/store.json" ] && cp -p "$SRC/store.json" "$DEST/store-$slot-$(date +%Y-%m-%d).json"
-  [ -f "$SRC/photo.jpg" ] && cp -p "$SRC/photo.jpg" "$DEST/photo-$slot.jpg"
+  # the chart holds names and phone numbers: copies are owner-only, whatever the source mode was
+  [ -f "$SRC/store.json" ] && cp -p "$SRC/store.json" "$DEST/store-$slot-$(date +%Y-%m-%d).json" && chmod 600 "$DEST/store-$slot-$(date +%Y-%m-%d).json"
+  [ -f "$SRC/photo.jpg" ] && cp -p "$SRC/photo.jpg" "$DEST/photo-$slot.jpg" && chmod 600 "$DEST/photo-$slot.jpg"
   [ -f "$SRC/secret.key" ] && [ ! -f "$DEST/secret-$slot.key" ] && cp -p "$SRC/secret.key" "$DEST/secret-$slot.key" && chmod 600 "$DEST/secret-$slot.key"
   # vapid.json holds the push keys; without it every phone's reminder subscription dies on restore
   [ -f "$SRC/vapid.json" ] && cp -p "$SRC/vapid.json" "$DEST/vapid-$slot.json" && chmod 600 "$DEST/vapid-$slot.json"
 done
+chmod 600 "$DEST"/store-*.json 2>/dev/null || true   # older copies from before this line
 find "$DEST" -name 'store-*.json' -mtime +30 -delete
 echo "$(date -Is) backed up to $DEST ($(ls "$DEST" | grep -c '^store-') copies kept)"
