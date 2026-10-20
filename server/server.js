@@ -51,6 +51,7 @@ const TOILET_BEFORE = new Set(CONTENT.toiletBefore.map((k) => k[0]));
 const SOCIAL_ITEMS = new Set(CONTENT.socialGroups.flatMap((g) => g.items.map((it, i) => g.id + ":" + i)));
 const SOCIAL_MOODS = new Set(CONTENT.socialMoods.map((m) => m[0]));
 const HEALTH_KINDS = new Set(CONTENT.health.kinds.map((k) => k[0]));
+const TEACH_OPEN_CAP = 5; // unconfirmed teaching claims one person may have waiting
 // Browsers only hand out push endpoints on these services. Anything else is a request to POST to a stranger's server.
 const PUSH_HOSTS = [".push.services.mozilla.com", "fcm.googleapis.com", "android.googleapis.com", ".notify.windows.com", "web.push.apple.com", ".push.apple.com"];
 const pushHostOk = (endpoint) => { try { const h = new URL(endpoint).hostname; return PUSH_HOSTS.some((d) => (d.startsWith(".") ? h.endsWith(d) : h === d)); } catch { return false; } };
@@ -391,7 +392,8 @@ function createApp(opts = {}) {
       catch (e) { return send(res, 502, { error: "SMS failed: " + e.message }); }
     }
     if (p === "/api/healthlog" && req.method === "POST") {
-      if (!isAdult) return send(res, 403, { error: "Grown-ups log health" });
+      if (!me) return needMe();
+      if (hasAdult && !isAdult) return send(res, 403, { error: "Grown-ups log health" });
       const body = await readJson(req);
       if (!HEALTH_KINDS.has(body.kind)) return send(res, 400, { error: "Bad kind" });
       if (!realDate(body.date)) return send(res, 400, { error: "Bad date" });
@@ -404,7 +406,8 @@ function createApp(opts = {}) {
       persist(); return send(res, 200, out());
     }
     if ((m = p.match(/^\/api\/healthlog\/([a-f0-9]{12})$/)) && req.method === "DELETE") {
-      if (!isAdult) return send(res, 403, { error: "Grown-ups log health" });
+      if (!me) return needMe();
+      if (hasAdult && !isAdult) return send(res, 403, { error: "Grown-ups log health" });
       const h = (db.health || []).find((x) => x.id === m[1]);
       if (!h) return send(res, 404, { error: "Not found" });
       h.void = true; persist(); return send(res, 200, out());
@@ -418,6 +421,11 @@ function createApp(opts = {}) {
       if (!learner || learner.id === me.id) return send(res, 400, { error: "Pick who you taught" });
       db.teach = db.teach || [];
       if (db.teach.some((t) => !t.void && t.teacher === me.id && t.learner === learner.id && t.skill === body.skill)) return send(res, 409, { error: "Already logged" });
+      // the skill has to be open in the tree (the client only shows the control on open skills; the server agrees)
+      const sk = REWARDS.compute(db, CONTENT, { today: localToday() }).skills[body.skill];
+      if (!sk || !sk.open) return send(res, 400, { error: "That skill is not open yet" });
+      // a few claims waiting is plenty: one kid should not be able to fill every phone with confirm cards
+      if (db.teach.filter((t) => !t.void && !t.confirmed && t.teacher === me.id).length >= TEACH_OPEN_CAP) return send(res, 429, { error: "You have " + TEACH_OPEN_CAP + " lessons waiting to be confirmed. Wait for one of those first." });
       db.teach.push({ id: crypto.randomBytes(6).toString("hex"), skill: body.skill, teacher: me.id, learner: learner.id, at: now(), confirmed: null });
       if (db.teach.length > 500) db.teach = db.teach.slice(-500);
       persist(); return send(res, 200, out());
