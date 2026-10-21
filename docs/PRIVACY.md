@@ -237,12 +237,15 @@ The last line is for Tim's hosted slots; a self-hoster replaces it.
 
 ## Recommended follow-ups, none done here
 
-1. Strip `phone` from the state sent to kids' phones (security review,
-   still open).
-2. Log rotation for `~/logs/puppy-training/*.log`, or stop writing the IP
-   on `login ok` and `me` lines (keep it on failures, which is what the
-   rate limiting needs).
-3. `chmod 600` the local backup copies in `ops/backup-puppy.sh`.
+1. Done 20 Oct 2026 (`priv/followups`): once the family has a grown-up,
+   `phone` is left out of the family record sent to a kid's phone. Grown-ups
+   see and edit numbers as before; an all-kids family keeps the full record
+   because the kids are its editors.
+2. Done 20 Oct 2026: `login ok` and `me` lines no longer carry the
+   address; `login failed`, `login locked` and `adult pin failed` keep it
+   for the lockout. Log rotation is still open.
+3. Done 20 Oct 2026: the backup script sets the store and photo copies to
+   mode 600 and fixes older copies on each run.
 4. A grown-up action "remove this person and their history" that voids or
    deletes every entry with their id, with a test.
 5. A `## Privacy` section in the README linking this file, and the note

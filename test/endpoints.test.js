@@ -205,3 +205,43 @@ test("buddies: an opt-in pair in settings; the streak counts days both trained",
     assert.equal(S.people.a.buddy, null, "Mum didn't pick a buddy");
   } finally { app.stop(); }
 });
+
+test("privacy: kids' phones never receive phone numbers once a grown-up exists; grown-ups and all-kids families do", async () => {
+  const app = await boot();
+  try {
+    const kid = await app.as("k"), mum = await app.as("a");
+    const forMum = (await app.call("GET", "/api/state", undefined, kid === mum ? kid : mum)).json.settings.family.find((m) => m.id === "a");
+    assert.match(forMum.phone || "", /^\+64/, "grown-up sees the number");
+    const forKid = (await app.call("GET", "/api/state", undefined, kid)).json.settings.family;
+    assert.ok(forKid.every((m) => !("phone" in m)), "no phone field at all on a kid's phone: " + JSON.stringify(forKid));
+    assert.ok(forKid.some((m) => m.sms === true), "the sms flag still shows, the number does not");
+    const before = (await app.call("GET", "/api/state", undefined, app.session)).json.settings.family;
+    assert.ok(before.every((m) => !("phone" in m)), "a phone that has not picked anyone is treated as a kid");
+  } finally { app.stop(); }
+  // all-kids family: the kids are the editors, so they keep the numbers (a save would otherwise wipe them)
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pt-"));
+  const server = createApp({ pin: PIN, dataDir: dir, log: () => {}, noScheduler: true, limits: { perIp: 50, global: 500 } });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  const base = "http://127.0.0.1:" + server.address().port;
+  try {
+    const login = await fetch(base + "/api/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pin: PIN }) });
+    const session = login.headers.get("set-cookie").split(";")[0];
+    const put = await fetch(base + "/api/settings", { method: "PUT", headers: { "Content-Type": "application/json", Cookie: session }, body: JSON.stringify({ puppy: { name: "Pip", sex: "girl", born: "2026-08-14" }, start: "2026-10-16", family: [{ id: "k", name: "Kid", kind: "kid", phone: "021 000 0000", sms: true }] }) });
+    assert.equal(put.status, 200);
+    assert.equal((await put.json()).settings.family[0].phone, "+64210000000");
+  } finally { server.close(); fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("privacy: successful logins and identity picks are logged without the address; failures keep it", async () => {
+  const seen = [];
+  const app = await boot({ log: (...a) => seen.push(a.join(" ")) });
+  try {
+    await app.as("k");
+    assert.ok(seen.includes("login ok"), seen.join(" | "));
+    assert.ok(seen.includes("me k"), seen.join(" | "));
+    assert.ok(!seen.some((l) => /^(login ok|me) .*127\.0\.0\.1/.test(l)));
+    const base = "http://127.0.0.1:" + app.server.address().port;
+    await fetch(base + "/api/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pin: "000000" }) });
+    assert.ok(seen.includes("login failed 127.0.0.1"), "failures keep the address for the lockout: " + seen.join(" | "));
+  } finally { app.stop(); }
+});
