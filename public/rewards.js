@@ -53,31 +53,57 @@
     return out;
   }
 
-  /* Deal today's missions: one skill per person per slot, rotating so everyone covers
-     every open skill across a week, plus a warm-up from the mastered pool. */
+  /* The course: one ordered path (C.course.levels) that every person walks at their own pace.
+     A lesson is done for a person after C.course.reps sessions of that skill on their own row,
+     or as soon as the whole pack has mastered the skill. "Current" is the first lesson not done. */
+  function course(state, C, st) {
+    const fam = (state.settings && state.settings.family) || [];
+    st = st || skillStatus(state, C);
+    const levels = (C.course && C.course.levels) || [];
+    const reps = (C.course && C.course.reps) || 3;
+    const order = [];
+    levels.forEach((l, li) => (l.skills || []).forEach((id, i) => { if (C.skills.some((s) => s.id === id)) order.push({ id, level: li, index: i }); }));
+    const counts = {}; // pid -> skill -> sessions
+    for (const k in state.ticks || {}) {
+      const t = state.ticks[k]; if (!t || t.void || !t.skill) continue;
+      const pid = k.split("_")[1];
+      (counts[pid] = counts[pid] || {})[t.skill] = (counts[pid][t.skill] || 0) + 1;
+    }
+    const people = {};
+    fam.forEach((p) => {
+      const mine = counts[p.id] || {};
+      const lessons = {}; let current = null, done = 0;
+      order.forEach((o) => {
+        const n = mine[o.id] || 0;
+        const mastered = !!(st[o.id] && st[o.id].mastered);
+        const isDone = mastered || n >= reps;
+        if (isDone) done++;
+        let status = isDone ? "done" : current ? "later" : "current";
+        if (status === "current") current = o.id;
+        lessons[o.id] = { count: Math.min(n, reps), reps, mastered, done: isDone, status, level: o.level, index: o.index };
+      });
+      people[p.id] = { lessons, current, done, total: order.length, graduated: order.length > 0 && done === order.length };
+    });
+    return { order: order.map((o) => o.id), reps, people };
+  }
+
+  /* Today's missions: every slot is the person's current lesson, with the lesson before it as the warm-up.
+     Someone who has finished the course revises, rotating through the lot. */
   function missions(state, C, date) {
     const fam = (state.settings && state.settings.family) || [];
-    const st = skillStatus(state, C);
-    const open = C.skills.filter((s) => st[s.id].open && !st[s.id].mastered).map((s) => s.id);
-    const done = C.skills.filter((s) => st[s.id].mastered).map((s) => s.id);
+    const co = course(state, C);
     const start = (state.settings && state.settings.start) || date;
     const dayIdx = Math.max(0, Math.round((parseIso(date) - parseIso(start)) / 864e5));
     const out = {};
-    fam.forEach((p, pi) => {
+    fam.forEach((p) => {
+      const me = co.people[p.id];
+      const cur = me && me.current;
+      const idx = cur ? co.order.indexOf(cur) : -1;
       out[p.id] = {};
-      // skills this person already logged today stay out of the day's remaining missions
-      const used = new Set();
-      SLOTS.forEach((slot) => { const t = (state.ticks || {})[date + "_" + p.id + "_" + slot]; if (t && !t.void && t.skill) used.add(t.skill); });
       SLOTS.forEach((slot, si) => {
-        const n = dayIdx * 3 + si;
-        let skill = done[0] || "name";
-        if (open.length) {
-          let i = (n + pi * 2) % open.length, tries = 0;
-          while (used.has(open[i]) && tries < open.length) { i = (i + 1) % open.length; tries++; }
-          skill = open[i]; used.add(skill);
-        }
-        const warm = done.length ? done[(n + pi) % done.length] : null;
-        out[p.id][slot] = { skill, warm: warm && warm !== skill ? warm : null };
+        let skill = cur, warm = idx > 0 ? co.order[idx - 1] : null;
+        if (!skill) { skill = co.order.length ? co.order[(dayIdx * 3 + si) % co.order.length] : "name"; warm = null; }
+        out[p.id][slot] = { skill, warm };
       });
     });
     return out;
@@ -293,9 +319,10 @@
       pack: { streak: packStreak, best: packBest, days: packDays, weekSessions: fam.reduce((a, p) => a + people[p.id].weekSessions, 0), weekTarget: fam.reduce((a, p) => a + people[p.id].target, 0) },
       puppy, biteWeek, calmDays, socialHappy,
       toilet: { today: todayToilet, lastOut, interval, accidentsAfter, ageWeeks },
-      missions: missions(state, C, todayS)
+      missions: missions(state, C, todayS),
+      course: course(state, C, st)
     };
   }
 
-  return { compute, skillStatus, missions, levelOf, iso, monday, addDays };
+  return { compute, skillStatus, missions, course, levelOf, iso, monday, addDays };
 });

@@ -42,12 +42,16 @@ check that a taught skill is open.
 
 ## Five tabs
 
-Today (missions, ticks, bite meter, toilet, cue strip, pending teaching
-confirmations), Skills (the tree, socialisation, timeline, health card),
+Today (the next lesson, ticks, bite meter, toilet, pending teaching
+confirmations), Lessons (route id `skills`: the course map, then
+socialisation, timeline and the health card; a lesson opens at
+`#lesson/<skill id>` as its own screen with watch, read, train and confirm),
 Pack (podium by percent of own goal, pack streak, badges, buddy and teaching
 chips, the certificate button), Tips (SOS biting card, kids' safety module,
 the other-pets section, biting plan, other problems; the tab was Help! until
-18 October and keeps the route id `help`), Watch (videos). Settings opens
+18 October and keeps the route id `help`; since 22 October it opens with
+the biting starter card and its three videos, and carries the cue sheet,
+treats and house rules at the bottom), Watch (videos). Settings opens
 from the gear: puppy and family, buddies, this phone, reminders, visitor
 link, exports.
 
@@ -63,7 +67,7 @@ link, exports.
 2. **Local** (`LocalStore`): anything else (GitHub Pages, a file opened from
    disk, the single-file build). Settings, ticks, logs, mastery, toilet,
    social, health and teach live in `localStorage` under `pt.*` keys.
-   Rewards, missions, the skill tree, the health card, teaching and the
+   Rewards, the course, the skill tree, the health card, teaching and the
    certificate work identically because `rewards.js` runs in the browser.
    Reminders, texts, the photo server and the visitor link are not offered.
    `scripts/smoke-features.py` proves this mode for the newer features.
@@ -207,9 +211,14 @@ rewards; nothing from the response is trusted for identity beyond `me`.
 - `skills[id]`: `open` (every prerequisite practised at least once or
   confirmed), `votes`, `need` (three different people, or the whole family
   if smaller), `mastered`, `who`, `practising`.
-- `missions[pid][slot]`: the skill dealt to each person and slot today.
-  Deterministic over the open-and-unmastered skills, so every phone agrees
-  without sync.
+- `course`: `order` (every lesson id in course order), `reps` (3) and
+  `people[pid]` with `lessons[id]` (`count`, `done`, `mastered`, `status`
+  of `done`, `current` or `later`), `current`, `done`, `total`,
+  `graduated`. A lesson is done after `reps` sessions on that person's own
+  row with that skill, or once the pack has mastered it.
+- `missions[pid][slot]`: the person's current lesson in every slot, with the
+  lesson before it as the warm-up; a graduate rotates through the course.
+  The notifier names it in nudges.
 - `challenge`: this week's challenge (nine, rotating by week number) with
   progress, target and `won`; a win adds 25 points to everyone.
 - `toilet`: last trip out, interval for the puppy's age, accident patterns.
@@ -270,7 +279,8 @@ decrypting as a browser would.
 - **Cropper**: pinch, zoom and rotate on a circular mask; the result is a
   JPEG data URL sent to `PUT /api/photo`.
 - **Routing**: the hash names the tab (`#today`, `#skills`, `#pack`, `#help`,
-  `#watch`, `#settings`) so Back works and reminders can deep-link.
+  `#watch`, `#settings`) or a lesson (`#lesson/<skill id>`) so Back works
+  and reminders can deep-link.
 - **Per-phone preferences** in `localStorage`: `pt.me` (remembered person),
   `pt.theme`, and on `burn/a11y-followups` `pt.haptics`.
 

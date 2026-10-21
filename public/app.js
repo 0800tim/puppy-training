@@ -2,7 +2,7 @@
  * Storage modes, picked automatically:
  *   server : self-hosted with server/server.js (family PIN, everyone syncs)
  *   local  : anywhere else (static hosting, opened from disk), saved on this device
- * Rewards (points, streaks, levels, badges, missions) are computed by rewards.js from the
+ * Rewards (points, streaks, levels, badges, the course) are computed by rewards.js from the
  * chart itself, so every phone agrees without extra sync.
  */
 (function () {
@@ -236,13 +236,17 @@ async function safe(fn, okMsg) {
 /* ---------- navigation ---------- */
 const TABS = ["today", "skills", "pack", "help", "watch"];
 let current = "today";
+let lessonId = null; // the lesson screen that is open, if any
 function show(tab, push) {
-  if (push !== false && location.hash !== "#" + tab && S.settings) { try { history.pushState(null, "", "#" + tab); } catch (e) {} }
+  const hash = tab === "lesson" ? "#lesson/" + lessonId : "#" + tab;
+  if (push !== false && location.hash !== hash && S.settings) { try { history.pushState(null, "", hash); } catch (e) {} }
   document.querySelectorAll("section.panel").forEach((s) => (s.hidden = s.dataset.tab !== tab));
   const inApp = TABS.includes(tab);
-  $("#tabs").hidden = !(inApp || (tab === "settings" && S.settings));
-  document.querySelectorAll("nav.tabs button").forEach((b) => b.setAttribute("aria-selected", b.dataset.go === tab ? "true" : "false"));
+  $("#tabs").hidden = !(inApp || tab === "lesson" || (tab === "settings" && S.settings));
+  const sel = tab === "lesson" ? "skills" : tab;
+  document.querySelectorAll("nav.tabs button").forEach((b) => b.setAttribute("aria-selected", b.dataset.go === sel ? "true" : "false"));
   if (inApp) { current = tab; try { sessionStorage.setItem("pt.tab", tab); } catch (e) {} }
+  if (tab !== "lesson") lessonId = null;
   window.scrollTo(0, 0);
 }
 document.querySelectorAll("nav.tabs button").forEach((b) => b.addEventListener("click", () => show(b.dataset.go)));
@@ -252,6 +256,7 @@ window.addEventListener("popstate", () => {
   if (!S.settings) return;
   const h = (location.hash || "").slice(1);
   if (TABS.includes(h)) show(h, false);
+  else if (h.startsWith("lesson/")) renderLesson(h.slice(7), false);
   else if (h === "settings") { renderSettings(false); show("settings", false); }
   else if (h === "who") renderWho(false);
   else show("today", false);
@@ -668,17 +673,19 @@ function renderToday() {
     el("button", { class: "iconbtn", "aria-label": "Next day", text: "›", disabled: isToday, onclick: () => { if (viewDay < today) { viewDay = addDays(viewDay, 1); renderToday(); } } })
   ]));
   if (viewDay < today && !isAdult(m)) P.append(el("p", { class: "note", text: "Past days can only be changed by a grown-up." }));
-  if (isToday) P.append(cueStrip());
 
-  // my missions
+  // my next lesson
   if (m && isToday) {
-    const my = scoreOf(m.id);
+    const my = scoreOf(m.id); const co = courseOf(m.id);
+    const cur = co && co.current ? skillById(co.current) : null;
+    const L = cur && co.lessons[cur.id];
     const card = el("div", { class: "card mine", style: "--c:" + colorOf(m) }, [
       el("div", { class: "row", style: "justify-content:space-between" }, [
-        el("div", { class: "who" }, [avatar(m), el("div", {}, [el("b", { text: "Your missions, " + m.name }), el("small", {}, my && my.streak ? [icon("flame", "inl flame"), my.streak + "-day streak" + (my.atRisk ? ", train today to keep it" : "")] : ["Start a streak today"])])]),
+        el("div", { class: "who" }, [avatar(m), el("div", {}, [el("b", { text: cur ? "Your next lesson, " + m.name : "All lessons done, " + m.name }), el("small", {}, my && my.streak ? [icon("flame", "inl flame"), my.streak + "-day streak" + (my.atRisk ? ", train today to keep it" : "")] : ["Start a streak today"])])]),
         my ? ring(my.today, 3, 48, colorOf(m)) : null]),
-      el("div", { class: "slots" }, C.slots.map((s) => slotButton(d, m, s, true))),
-      el("p", { class: "note", text: "Warm up with something " + T("she") + " knows, two minutes on the mission, finish on a win." })
+      cur ? lessonCta(cur, L) : el("p", { class: "note", style: "margin-top:8px", text: "Revise anything from the Lessons tab. " + pupName() + " never minds a repeat." }),
+      el("div", { class: "slots" }, C.slots.map((s) => slotButton(d, m, s, false))),
+      el("p", { class: "note", text: "Three 5-minute sessions a day. Tap a slot if you have already trained without the timer." })
     ]);
     P.append(card);
   } else if (!m && S.settings) {
@@ -817,13 +824,6 @@ function showCertificate() {
   const onKey = (e) => { if (e.key === "Escape") close(); };
   document.addEventListener("keydown", onKey);
   document.body.classList.add("printing-cert"); document.body.append(ov); ov.querySelector("button").focus();
-}
-
-/* ---------- the cue sheet, pinned ---------- */
-function cueStrip() {
-  const strip = el("div", { class: "cues", role: "list", "aria-label": "Cue words everyone uses" });
-  C.cues.forEach(([word, means]) => strip.append(el("button", { class: "cue", role: "listitem", type: "button", title: T(means), "aria-label": word + ": " + T(means), onclick: () => openAcc("cue-sheet", "skills") }, [el("b", { text: word }), el("small", { text: T(means).split(/[.,:]/)[0] })])));
-  return el("div", { class: "cuewrap" }, [el("div", { class: "row", style: "justify-content:space-between;margin-bottom:6px" }, [el("div", { class: "eyebrow", text: "Same words, everyone" }), el("button", { class: "linkbtn", type: "button", text: "Full sheet", onclick: () => openAcc("cue-sheet", "skills") })]), strip]);
 }
 
 /* ---------- celebrations ---------- */
@@ -997,98 +997,190 @@ function lureSVG(kind) {
     '</svg><figcaption>' + caps[kind] + '</figcaption></figure>';
 }
 
-/* ---------- skills (the tree) ---------- */
-function skillCard(s) {
-  const st = S.scores ? S.scores.skills[s.id] : { open: true, mastered: false, votes: 0, need: 3, who: [], practising: false };
-  const m = me();
-  const body = el("div", { class: "acc-body" });
-  if (!st.open) body.append(el("p", { class: "note locked", text: "Unlocks as soon as someone has practised " + (s.req || []).map((r) => skillById(r) ? T(skillById(r).nm) : r).join(" and ") + " in a session. You can read ahead now." }));
-  if (s.lure) body.append(el("div", { html: lureSVG(s.lure) }));
-  body.append(el("ol", { class: "steps" }, s.steps.map((x) => el("li", { text: T(x) }))));
-  body.append(el("div", { class: "done" }, [el("b", { text: "Done when: " }), T(s.done)]));
-  body.append(el("p", { class: "note", text: "Raise one thing at a time: time, then distance, then distractions. New room or new person? Drop back a step and rebuild." }));
-  // mastery votes
+/* ---------- the course: lessons ---------- */
+const courseOf = (pid) => (S.scores && S.scores.course && S.scores.course.people[pid]) || null;
+const lessonsOrder = () => (S.scores && S.scores.course ? S.scores.course.order : [].concat(...C.course.levels.map((l) => l.skills)));
+function lessonLabel(id) { const li = Math.max(0, C.course.levels.findIndex((l) => l.skills.includes(id))); const L = C.course.levels[li]; return { level: L, li, n: L.skills.indexOf(id) + 1, of: L.skills.length }; }
+const watchedKey = () => "pt.watched." + (meId || "anon");
+const watched = (id) => (lsGet(watchedKey(), []) || []).includes(id);
+function markWatched(id) { const w = lsGet(watchedKey(), []) || []; if (!w.includes(id)) { w.push(id); lsSet(watchedKey(), w); } }
+const thumbUrl = (id) => "https://i.ytimg.com/vi/" + id + "/mqdefault.jpg";
+const thumb = (vid, cls) => el("span", { class: "thumb " + (cls || ""), "aria-hidden": "true" }, [el("img", { src: thumbUrl(vid), alt: "", loading: "lazy" }), el("span", { class: "play" })]);
+function heroVideo(id, onPlay) {
+  const v = C.videos[id]; if (!v) return null;
+  const [title, by, min] = v;
+  const b = el("button", { class: "vhero" + (watched(id) ? " watched" : ""), type: "button", "aria-label": "Play: " + title + (watched(id) ? " (watched)" : ""), onclick: () => { playVideo(id); markWatched(id); b.classList.add("watched"); if (onPlay) onPlay(); } }, [
+    el("span", { class: "cover" }, [el("img", { src: thumbUrl(id), alt: "", loading: "lazy" }), el("span", { class: "play" }), min ? el("span", { class: "len", text: min + " min" }) : null]),
+    el("span", { class: "cap" }, [el("b", { text: title }), el("small", { text: by })])]);
+  return b;
+}
+function stepHead(n, title, aside) { return el("div", { class: "step" }, [el("span", { class: "n", "aria-hidden": "true", text: String(n) }), el("h3", { text: title }), aside ? el("small", { text: aside }) : null]); }
+function repDots(L) { return el("div", { class: "reps", role: "img", "aria-label": L.count + " of " + L.reps + " sessions" }, [...Array(L.reps)].map((_, i) => el("i", { class: i < L.count ? "on" : "" }))); }
+function lessonCta(sk, L) {
+  const lab = lessonLabel(sk.id);
+  return el("button", { class: "lesson-cta", type: "button", onclick: () => renderLesson(sk.id) }, [
+    thumb(sk.hero),
+    el("span", { class: "txt" }, [el("span", { class: "eyebrow", text: lab.level.nm + " · " + lab.n + " of " + lab.of }), el("b", { text: T(sk.nm) }),
+      el("small", { text: L && L.count ? L.count + " of " + L.reps + " sessions done" : watched(sk.hero) ? "Video watched. Train when you're ready." : "Watch the video first, then train" })]),
+    icon("chevron")]);
+}
+/* which slot a session logged right now goes into: the one whose window we are in, else the next free one */
+function slotForNow(pid) {
+  const d = iso(today), n = new Date(), h = n.getHours() + n.getMinutes() / 60;
+  const free = C.slots.filter((s) => { const t = S.ticks[tickKey(d, pid, s.id)]; return !t || t.void; });
+  if (!free.length) return null;
+  const win = C.slots.find((s) => { const [a, b] = C.slotWindows[s.id]; return h >= a && h < b; });
+  if (win && free.includes(win)) return win;
+  return free.find((s) => C.slotWindows[s.id][0] >= h) || free[free.length - 1];
+}
+async function logSession(sk) {
+  const m = me(); if (!m) { renderWho(); return false; }
+  const slot = slotForNow(m.id);
+  if (!slot) { toast("Three sessions today already. " + pupName() + " needs a nap; see you tomorrow."); return false; }
+  const before = courseOf(m.id); const was = before && before.lessons[sk.id] ? before.lessons[sk.id].count : 0;
+  let ok = false;
+  await safe(async () => { await store.setTick(tickKey(iso(today), m.id, slot.id), true, { by: m.id, skill: sk.id }); ok = true; });
+  if (!ok) return false;
+  buzz([20, 30, 20]);
+  const after = courseOf(m.id); const L = after && after.lessons[sk.id];
+  if (L && L.done && was < L.reps) {
+    const next = after.current && skillById(after.current);
+    celebrate("Lesson done: " + T(sk.nm), next ? "Next up: " + T(next.nm) + ". " + pupName() + " is getting the idea too." : "That was the last lesson. " + pupName() + " has a graduate.", "🎓");
+  } else toast("+" + C.points.session + " · " + (L ? L.count + " of " + L.reps + " for this lesson" : "logged") + " · " + slot.t.toLowerCase() + " slot");
+  return true;
+}
+/* the 5-minute session: warm-up, the lesson, play */
+let timer = null;
+function sessionTimer(sk, host, onDone) {
+  const phases = C.course.session;
+  const st = { i: 0, left: phases[0][1], paused: false, iv: null, lock: null };
+  const big = el("div", { class: "t-time" }), ph = el("div", { class: "t-phase" }), hint = el("p", { class: "t-hint" });
+  const dots = el("div", { class: "t-dots", "aria-hidden": "true" }, phases.map(() => el("i")));
+  const fmtT = (x) => Math.floor(x / 60) + ":" + pad(x % 60);
+  const draw = () => { big.textContent = fmtT(st.left); ph.textContent = st.i === 1 ? T(sk.nm) : phases[st.i][0]; hint.textContent = T(phases[st.i][2]); dots.querySelectorAll("i").forEach((x, i) => x.classList.toggle("on", i <= st.i)); };
+  const stop = () => { clearInterval(st.iv); timer = null; try { if (st.lock) st.lock.release(); } catch (e) {} };
+  const next = () => { if (st.i >= phases.length - 1) { stop(); onDone(); return; } st.i++; st.left = phases[st.i][1]; buzz([40, 60, 40]); draw(); };
+  st.iv = setInterval(() => { if (st.paused) return; st.left--; if (st.left <= 0) next(); else draw(); }, 1000);
+  try { if (navigator.wakeLock) navigator.wakeLock.request("screen").then((l) => (st.lock = l)).catch(() => {}); } catch (e) {}
+  timer = st;
+  const pause = el("button", { class: "btn ghost", type: "button", text: "Pause", onclick: () => { st.paused = !st.paused; pause.textContent = st.paused ? "Resume" : "Pause"; } });
+  host.replaceChildren(el("div", { class: "card timer", role: "timer", "aria-live": "off" }, [dots, ph, big, hint,
+    el("div", { class: "row", style: "justify-content:center" }, [pause, el("button", { class: "btn ghost", type: "button", text: "Next part", onclick: next }), el("button", { class: "btn", type: "button", text: "Finish and tick it off", onclick: () => { stop(); onDone(); } })]),
+    el("button", { class: "linkbtn", type: "button", text: "Stop without logging", onclick: () => { stop(); renderLesson(sk.id, false); } })]));
+  draw(); window.scrollTo({ top: host.offsetTop - 80, behavior: "smooth" });
+}
+function masteryCard(s, st, m) {
+  const body = el("div", { class: "card", style: "display:grid;gap:10px" });
   const voters = st.who.map((id) => person(id)).filter(Boolean);
-  const votesRow = el("div", { class: "votes" }, [
+  body.append(el("div", { class: "votes" }, [
     el("span", { class: "vdots", "aria-label": st.votes + " of " + st.need + " confirmations" }, [...Array(st.need)].map((_, i) => el("i", { class: i < st.votes ? "on" : "" }))),
-    el("small", { text: st.mastered ? "Mastered by the whole pack" : voters.length ? "Confirmed by " + voters.map((p) => p.name).join(", ") + ". " + (st.need - st.votes) + " more to master." : "Nobody has confirmed the goal yet. " + st.need + " different people need to, each with a witness." })
-  ]);
-  body.append(votesRow);
-  if (m && st.open) {
-    const mine = st.who.includes(m.id);
-    if (mine) body.append(el("button", { class: "btn ghost", type: "button", text: "Take back my confirmation", onclick: () => safe(() => store.setMastery(s.id, m.id, null, false)) }));
-    else {
-      const others = family().filter((p) => p.id !== m.id);
-      const wit = el("select", { "aria-label": "Who saw it?" }, [el("option", { value: "", text: "Who saw it?" }), ...others.map((p) => el("option", { value: p.id, text: p.name }))]);
-      body.append(el("div", { class: "row" }, [wit, el("button", { class: "btn", type: "button", text: T("She") + " did it!", onclick: async () => {
-        if (!wit.value) { toast("Pick who watched"); return; }
-        await safe(async () => { await store.setMastery(s.id, m.id, wit.value, true); buzz([20, 30, 20]); toast("+" + C.points.mastery + " for you, +" + C.points.witness + " for " + person(wit.value).name); });
-      } })]));
-      body.append(el("small", { class: "note", text: "Confirm when " + T("she") + " hits the goal above with you, and someone else saw it. Big points, so it needs a witness." }));
-    }
+    el("small", { text: st.mastered ? "Mastered by the whole pack. Big points all round." : voters.length ? "Confirmed by " + voters.map((p) => p.name).join(", ") + ". " + (st.need - st.votes) + " more to master." : st.need + " different people confirm it, each with a witness, and the whole pack scores." })]));
+  const mine = st.who.includes(m.id);
+  if (mine) body.append(el("button", { class: "btn ghost", type: "button", text: "Take back my confirmation", onclick: () => safe(() => store.setMastery(s.id, m.id, null, false)) }));
+  else {
+    const others = family().filter((p) => p.id !== m.id);
+    const wit = el("select", { "aria-label": "Who saw it?" }, [el("option", { value: "", text: "Who saw it?" }), ...others.map((p) => el("option", { value: p.id, text: p.name }))]);
+    body.append(el("div", { class: "row" }, [wit, el("button", { class: "btn", type: "button", text: T("She") + " did it!", onclick: async () => {
+      if (!wit.value) { toast("Pick who watched"); return; }
+      await safe(async () => { await store.setMastery(s.id, m.id, wit.value, true); buzz([20, 30, 20]); toast("+" + C.points.mastery + " for you, +" + C.points.witness + " for " + person(wit.value).name); });
+    } })]));
+    body.append(el("small", { class: "note", text: "Confirm when " + T("she") + " hits the goal with you, and someone else saw it: " + T(s.done) }));
   }
-  if (m && st.open && family().length > 1) {
+  if (family().length > 1) {
     const others = family().filter((p) => p.id !== m.id);
     const who = el("select", { "aria-label": "Who did you teach?" }, [el("option", { value: "", text: "I taught this to…" }), ...others.map((p) => el("option", { value: p.id, text: p.name }))]);
-    const mine = (S.teach || []).filter((t) => t.skill === s.id && t.teacher === m.id);
+    const taught = (S.teach || []).filter((t) => t.skill === s.id && t.teacher === m.id);
     body.append(el("div", { class: "row teach" }, [who, el("button", { class: "btn ghost", type: "button", text: "Log it", onclick: async () => {
       if (!who.value) { toast("Pick who you taught"); return; }
       await safe(async () => { await store.addTeach(s.id, who.value, m.id); toast(person(who.value).name + " confirms it from their phone, then you both score"); who.value = ""; });
     } })]));
-    if (mine.length) body.append(el("small", { class: "note", text: "Taught to " + mine.map((t) => (person(t.learner) ? person(t.learner).name : "?") + (t.confirmed ? " ✓" : " (waiting)")).join(", ") }));
+    if (taught.length) body.append(el("small", { class: "note", text: "Taught to " + taught.map((t) => (person(t.learner) ? person(t.learner).name : "?") + (t.confirmed ? " ✓" : " (waiting)")).join(", ") }));
   }
-  if (s.help) body.append(el("button", { class: "chip", text: "Full biting plan →", onclick: () => show("help") }));
-  body.append(vids(s.v));
-  const pill = st.mastered ? el("span", { class: "pill good", text: "Mastered" }) : !st.open ? el("span", { class: "pill" }, [icon("lock"), "Locked"]) : st.votes ? el("span", { class: "pill warm", text: st.votes + "/" + st.need }) : st.practising ? el("span", { class: "pill warm", text: "Practising" }) : el("span", { class: "pill open", text: "Open" });
-  return el("details", { class: "acc skill" + (st.mastered ? " mastered" : !st.open ? " locked" : ""), id: "sk-" + s.id }, [el("summary", {}, [el("div", { class: "nm" }, [el("h3", { text: T(s.nm) }), el("small", { text: (s.req && s.req.length ? "Needs " + s.req.map((r) => skillById(r) ? T(skillById(r).nm) : r).join(", ") : "No prerequisites") })]), pill]), body]);
+  return body;
+}
+function renderLesson(id, push) {
+  const sk = skillById(id); if (!sk) { show("skills"); return; }
+  if (timer) return; // a session is running on this screen; leave it alone
+  lessonId = id;
+  const P = $("#p-lesson"); P.replaceChildren();
+  const m = me(); const co = m && courseOf(m.id); const L = co ? co.lessons[id] : null;
+  const lab = lessonLabel(id); const st = S.scores ? S.scores.skills[id] : null;
+  const status = L ? L.status : "current";
+  const order = lessonsOrder(); const at = order.indexOf(id);
+  P.append(el("button", { class: "back", type: "button", onclick: () => show("skills") }, [icon("chevron"), "All lessons"]));
+  const pill = status === "done" ? el("span", { class: "pill good", text: L.mastered ? "Mastered by the pack" : "Done" }) : status === "later" ? el("span", { class: "pill" }, [icon("lock"), "Read ahead"]) : el("span", { class: "pill warm", text: L && L.count ? "In progress" : "Your next lesson" });
+  P.append(el("div", { class: "card lesson-hero" }, [
+    el("div", { class: "row", style: "justify-content:space-between" }, [el("div", { class: "eyebrow", text: "Level " + (lab.li + 1) + " · " + lab.level.nm + " · lesson " + lab.n + " of " + lab.of }), pill]),
+    el("h2", { text: T(sk.nm) }),
+    el("p", { class: "note", text: "Done when: " + T(sk.done) }),
+    L ? el("div", { class: "row" }, [repDots(L), el("small", { text: L.count + " of " + L.reps + " sessions" })]) : null]));
+  // 1 watch
+  const hv = C.videos[sk.hero] || [];
+  const w1 = el("small", { text: watched(sk.hero) ? "Watched" : hv[2] ? hv[2] + " min" : "" });
+  P.append(stepHead(1, "Watch how it's done", null)); P.lastChild.append(w1);
+  P.append(heroVideo(sk.hero, () => { w1.textContent = "Watched"; }));
+  if (sk.v && sk.v.length) P.append(el("details", { class: "acc" }, [el("summary", {}, el("div", { class: "nm" }, [el("h3", { text: "More videos (" + sk.v.length + ")" }), el("small", { text: "Different trainers, same idea" })])), el("div", { class: "acc-body" }, vids(sk.v))]));
+  // 2 how
+  P.append(stepHead(2, "How to teach it"));
+  const how = el("div", { class: "card", style: "display:grid;gap:10px" });
+  if (sk.lure) how.append(el("div", { html: lureSVG(sk.lure) }));
+  how.append(el("ol", { class: "steps big" }, sk.steps.map((x) => el("li", { text: T(x) }))));
+  how.append(el("p", { class: "note", text: "Raise one thing at a time: time, then distance, then distractions. New room or new person? Drop back a step." }));
+  if (sk.help) how.append(el("button", { class: "chip", type: "button", text: "The biting plan →", onclick: () => show("help") }));
+  P.append(how);
+  // 3 train
+  P.append(stepHead(3, "Train, then tick it off", L ? L.count + " of " + L.reps : ""));
+  const host = el("div");
+  const my = m && scoreOf(m.id);
+  if (!m) host.append(el("div", { class: "card" }, [el("p", { class: "note", text: "Pick yourself first so the session counts for you." }), el("button", { class: "btn", type: "button", text: "Pick me", onclick: () => renderWho() })]));
+  else if (status === "later") { const cur = co && co.current && skillById(co.current); host.append(el("div", { class: "card" }, [el("p", { class: "note locked", text: "Finish " + (cur ? T(cur.nm) : "the lesson before") + " first. Reading ahead is fine." }), cur ? el("button", { class: "btn ghost", type: "button", text: "Go to " + T(cur.nm), onclick: () => renderLesson(cur.id) }) : null])); }
+  else host.append(el("div", { class: "card train", style: "display:grid;gap:10px" }, [
+    el("p", { style: "margin:0", text: "5 minutes: a one-minute warm-up, three minutes on " + T(sk.nm) + ", then a minute of play. The timer walks you through it and ticks the session off at the end." }),
+    el("div", { class: "row" }, [
+      el("button", { class: "btn", type: "button", text: "Start the 5-minute session", onclick: () => sessionTimer(sk, host, async () => { await logSession(sk); renderLesson(id, false); }) }),
+      el("button", { class: "btn ghost", type: "button", text: "Already did one: tick it off", onclick: async () => { await logSession(sk); renderLesson(id, false); } })]),
+    el("small", { class: "note", text: (my ? my.today : 0) + " of 3 sessions today. Finish on a win, then toilet trip." })]));
+  P.append(host);
+  // 4 mastery
+  if (st && m && status !== "later") { P.append(stepHead(4, "When " + pupName() + " nails it", st.mastered ? "Mastered" : st.votes + " of " + st.need)); P.append(masteryCard(sk, st, m)); }
+  // prev and next
+  const prev = at > 0 ? skillById(order[at - 1]) : null, nxt = at >= 0 && at < order.length - 1 ? skillById(order[at + 1]) : null;
+  P.append(el("div", { class: "row", style: "justify-content:space-between" }, [
+    prev ? el("button", { class: "btn ghost", type: "button", text: "‹ " + T(prev.nm), onclick: () => renderLesson(prev.id) }) : el("span"),
+    nxt ? el("button", { class: "btn ghost", type: "button", text: T(nxt.nm) + " ›", onclick: () => renderLesson(nxt.id) }) : el("span")]));
+  show("lesson", push);
+}
+function lessonRow(id, n, co) {
+  const sk = skillById(id); if (!sk) return null;
+  const L = co && co.lessons[id]; const status = L ? L.status : "current";
+  const sub = status === "done" ? (L.mastered ? "Mastered by the pack" : "Done. Tap to revise") : status === "current" ? (L && L.count ? L.count + " of " + L.reps + " sessions done" : "Your next lesson") : "Read ahead";
+  return el("button", { class: "lesson " + status, type: "button", onclick: () => renderLesson(id) }, [
+    el("span", { class: "lnum " + status, "aria-hidden": "true" }, status === "done" ? icon("check") : status === "later" ? icon("lock") : String(n)),
+    el("span", { class: "txt" }, [el("b", { text: T(sk.nm) }), el("small", { text: sub })]),
+    el("span", { class: "thumb", "aria-hidden": "true" }, el("img", { src: thumbUrl(sk.hero), alt: "", loading: "lazy" }))]);
 }
 function renderSkills() {
   const P = $("#p-skills"); P.replaceChildren();
-  const sc = S.scores;
-  P.append(el("div", { class: "card focus" }, [el("div", { class: "eyebrow", text: "Skills" }), el("h2", { class: "h2", text: "Pick anything that's open" }),
-    el("p", { class: "note", style: "margin-top:6px", text: "A skill opens as soon as someone has practised the one it builds on: one Sit session opens Down and Stay, one Come session opens Hide and seek. Mastering takes three people and a witness. Everyone does everything: the missions on Today make sure the week covers the lot." })]));
-  const groups = [["Open now", (st) => st.open && !st.mastered], ["Mastered", (st) => st.mastered], ["Locked for now", (st) => !st.open]];
-  groups.forEach(([title, fn]) => {
-    const items = C.skills.filter((s) => fn(sc ? sc.skills[s.id] : { open: true }));
-    if (!items.length) return;
-    P.append(el("div", { class: "eyebrow", text: title + " (" + items.length + ")" }));
-    items.forEach((s) => P.append(skillCard(s)));
+  const m = me(); const co = m && courseOf(m.id);
+  const cur = co && co.current ? skillById(co.current) : null;
+  P.append(el("div", { class: "card hero" }, [
+    el("div", { class: "eyebrow", text: "Lessons" }),
+    el("h2", { text: co ? (co.graduated ? m.name + " has done the lot" : co.done + " of " + co.total + " lessons done, " + m.name) : "Puppy 101 to tricks" }),
+    el("small", { text: "Everyone starts at lesson one. Watch the video, read the steps, then three 5-minute sessions ticks the lesson." }),
+    bar(co ? (co.done / co.total) * 100 : 0, "big", "Lessons done"),
+    cur ? el("button", { class: "chal", type: "button", onclick: () => renderLesson(cur.id) }, [icon("play"), el("span", { text: "Continue: " + T(cur.nm) }), icon("chevron")]) : null]));
+  P.append(el("details", { class: "acc", id: "how-lessons" }, [el("summary", {}, [icon("grad", "inl"), el("div", { class: "nm" }, [el("h3", { text: C.course.intro.nm }), el("small", { text: "Two short videos before the first lesson" })])]),
+    el("div", { class: "acc-body" }, [el("p", { text: T(C.course.intro.lead) }),
+      el("ol", { class: "steps" }, C.course.session.map(([nm, secs, hint]) => el("li", { html: "<b>" + nm + ", " + Math.round(secs / 60) + " min:</b> " + T(hint) }))),
+      vids(C.course.intro.v)])]));
+  C.course.levels.forEach((lv, li) => {
+    const doneN = co ? lv.skills.filter((id) => co.lessons[id] && co.lessons[id].done).length : 0;
+    P.append(el("div", { class: "lvl-head" }, [el("div", { class: "eyebrow", text: "Level " + (li + 1) + " · " + lv.nm }), el("small", { class: "muted", text: co ? doneN + " of " + lv.skills.length : lv.tag })]));
+    P.append(el("p", { class: "note", text: T(lv.lead) }));
+    P.append(el("div", { class: "lessons" }, lv.skills.map((id, i) => lessonRow(id, i + 1, co))));
   });
-  // suggested path and the plan material
-  P.append(el("div", { class: "eyebrow", text: "A suggested path" }));
-  const ci = weekIndex(today);
-  const born = S.settings && parseIso(S.settings.puppy.born);
-  P.append(el("details", { class: "acc" }, [el("summary", {}, el("div", { class: "nm" }, [el("h3", { text: "The 6-week plan" }), el("small", { text: "If you like a map. Nothing here is a gate." })])),
-    el("div", { class: "acc-body" }, C.weeks.map((w, i) => {
-      const s = addDays(startDate(), i * 7), e = addDays(s, 6);
-      const age = born ? " · " + Math.floor(Math.round((s - born) / 864e5) / 7) + " weeks old" : "";
-      return el("article", { class: "card wk" + (i === ci ? " current" : "") }, [
-        el("header", {}, [el("h3", { text: "Week " + (i + 1) + ": " + w.title }), el("span", { class: "dates", text: short(s) + " – " + short(e) + age })]),
-        el("div", { class: "chips" }, w.skills.map((id) => { const sk = skillById(id); return sk ? el("button", { class: "chip", text: T(sk.nm), onclick: () => openAcc("sk-" + id, "skills") }) : null; })),
-        el("p", { class: "note", text: T(w.note) })]);
-    }))]));
-  P.append(el("div", { class: "eyebrow", text: "The plan: how a session goes" }));
-  P.append(el("div", { class: "card" }, [el("h2", { class: "h2", text: "5 minutes, 3 times a day, each" }),
-    el("ol", { class: "steps", style: "margin-top:8px" }, [
-      el("li", { html: "<b>1 minute warm-up</b> with something " + T("she") + " already knows." }),
-      el("li", { html: "<b>2 to 3 minutes</b> on the mission: 5 to 10 quick reps, lots of treats, then a sniff break." }),
-      el("li", { html: "<b>1 minute</b> of play, and finish on an easy win." })]),
-    el("p", { class: "note", style: "margin-top:8px", text: T("Short sessions beat long ones. If she starts biting, zooming or ignoring you, she's tired: stop, toilet break, nap.") })]));
+  P.append(el("div", { class: "eyebrow", style: "margin-top:10px", text: "Beyond the lessons" }));
   P.append(el("div", { class: "callout" }, [el("b", { text: "Puppy preschool: book early" }), el("p", { text: T(C.preschool) })]));
-  P.append(el("div", { class: "eyebrow", text: "Same words, everyone" }));
-  P.append(el("details", { class: "acc", id: "cue-sheet", open: true }, [el("summary", {}, el("div", { class: "nm" }, [el("h3", { text: "The cue sheet" }), el("small", { text: "One word per behaviour. Say it once." })])),
-    el("div", { class: "acc-body" }, [el("p", { class: "note", text: T("She learns fastest when everyone says exactly the same thing. Say a cue once. If she doesn't do it, make it easier rather than repeating louder.") }),
-      el("table", { class: "cue-tbl" }, C.cues.map(([a, b]) => el("tr", {}, [el("td", { text: a }), el("td", { text: T(b) })])))])]));
-  P.append(el("div", { class: "eyebrow", text: "Treats" }));
-  P.append(el("div", { class: "card focus" }, [el("h2", { class: "h2", text: "Pea-sized, soft and smelly" }), el("p", { class: "note", style: "margin-top:6px", text: T(C.treats.intro) })]));
-  P.append(el("div", { class: "ladder" }, C.treats.ladder.map((x) => el("div", { class: "rung " + x.c }, [el("div", { class: "lvl", text: x.l }), el("div", {}, [el("b", { text: x.t }), el("p", { text: T(x.d) })])]))));
-  const td = (today.getDay() + 6) % 7;
-  P.append(el("div", { class: "eyebrow", text: "Treat of the day" }));
-  P.append(el("div", { class: "rota" }, C.treats.rota.map(([d, t], i) => el("div", { class: i === td ? "today" : "" }, [el("b", { text: d }), t]))));
-  P.append(el("div", { class: "card" }, [el("div", { class: "eyebrow", text: "The morning treat pot" }), el("p", { style: "margin:6px 0 0", text: T(C.treats.pot) })]));
-  P.append(el("div", { class: "callout danger" }, [el("b", { text: "Never give these" }), el("p", { text: C.treats.never })]));
-  P.append(el("div", { class: "eyebrow", text: "House rules" }));
-  P.append(el("div", { class: "card" }, el("ul", { class: "plain" }, C.rules.map((x) => el("li", { text: T(x) })))));
   renderSocial(P);
   renderTimeline(P);
   renderHealth(P);
@@ -1208,6 +1300,21 @@ function renderHelp() {
   const P = $("#p-help"); P.replaceChildren();
   P.append(el("div", { class: "sos" }, [el("div", { class: "eyebrow", style: "color:inherit;opacity:.85", text: "SOS" }), el("h2", { text: T(C.sos.title) }),
     el("ol", {}, C.sos.steps.map((x) => el("li", { text: T(x) })))]));
+  if (C.bitingStart) {
+    const B = C.bitingStart;
+    P.append(el("div", { class: "card start" }, [el("div", { class: "eyebrow", text: "Start here" }), el("h2", { class: "h2", text: T(B.nm) }), el("p", { class: "note", text: T(B.lead) }),
+      el("ol", { class: "steps big" }, B.steps.map((x) => el("li", { text: T(x) }))),
+      el("div", { class: "eyebrow", text: "Watch these three" }),
+      el("div", { class: "vstrip" }, B.v.map((id) => heroVideo(id))),
+      B.shorts && B.shorts.length ? el("div", {}, [el("div", { class: "eyebrow", text: "One-minute versions" }), vids(B.shorts)]) : null]));
+  }
+  P.append(el("div", { class: "eyebrow", text: "The full biting plan, in bite-sized pieces" }));
+  C.biting.forEach((b) => {
+    const body = el("div", { class: "acc-body" }, [vids(b.v), ...b.body.map((x) => el("p", { text: T(x) }))]);
+    if (b.do) body.append(list("do", "Do", b.do));
+    if (b.dont) body.append(list("dont", "Don't", b.dont));
+    P.append(el("details", { class: "acc", id: "bite-" + b.id }, [el("summary", {}, [el("div", { class: "nm" }, [el("h3", { text: T(b.nm) }), b.v && b.v.length ? el("small", { text: b.v.length + " video" + (b.v.length > 1 ? "s" : "") }) : null]), b.tag ? el("span", { class: "pill" + (b.tag === "Biggest cause" || b.tag === "Important" ? " hot" : ""), text: b.tag }) : null]), body]));
+  });
   if (C.kids) {
     const K = C.kids;
     P.append(el("div", { class: "eyebrow", text: "Kids and " + pupName() }));
@@ -1233,19 +1340,25 @@ function renderHelp() {
       P.append(el("details", { class: "acc", id: "pet-" + s.id }, [el("summary", {}, [icon(s.icon, "inl"), el("div", { class: "nm" }, el("h3", { text: T(s.nm) })), s.tag ? el("span", { class: "pill", text: s.tag }) : null]), body]));
     });
   }
-  P.append(el("div", { class: "eyebrow", text: "Stop the biting, in bite-sized pieces" }));
-  C.biting.forEach((b) => {
-    const body = el("div", { class: "acc-body" }, b.body.map((x) => el("p", { text: T(x) })));
-    if (b.do) body.append(list("do", "Do", b.do));
-    if (b.dont) body.append(list("dont", "Don't", b.dont));
-    body.append(vids(b.v));
-    P.append(el("details", { class: "acc", id: "bite-" + b.id }, [el("summary", {}, [el("div", { class: "nm" }, el("h3", { text: T(b.nm) })), b.tag ? el("span", { class: "pill" + (b.tag === "Biggest cause" || b.tag === "Important" ? " hot" : ""), text: b.tag }) : null]), body]));
-  });
   P.append(el("div", { class: "eyebrow", text: "Other puppy problems" }));
   C.problems.forEach((p) => {
     const body = el("div", { class: "acc-body" }, [el("p", { text: T(p.what) }), list("do", "Do", p.do), list("dont", "Don't", p.dont), vids(p.v)]);
     P.append(el("details", { class: "acc", id: "pr-" + p.id }, [el("summary", {}, [el("span", { class: "ico", "aria-hidden": "true", text: p.icon }), el("div", { class: "nm" }, el("h3", { text: T(p.nm) }))]), body]));
   });
+  // the reference sheet: same words, treats, house rules
+  P.append(el("div", { class: "eyebrow", text: "Same words, everyone" }));
+  P.append(el("details", { class: "acc", id: "cue-sheet" }, [el("summary", {}, el("div", { class: "nm" }, [el("h3", { text: "The cue sheet" }), el("small", { text: "One word per behaviour. Say it once." })])),
+    el("div", { class: "acc-body" }, [el("p", { class: "note", text: T("She learns fastest when everyone says exactly the same thing. Say a cue once. If she doesn't do it, make it easier rather than repeating louder.") }),
+      el("table", { class: "cue-tbl" }, C.cues.map(([a, b]) => el("tr", {}, [el("td", { text: a }), el("td", { text: T(b) })])))])]));
+  P.append(el("div", { class: "eyebrow", text: "Treats" }));
+  P.append(el("details", { class: "acc", id: "treats" }, [el("summary", {}, el("div", { class: "nm" }, [el("h3", { text: "Pea-sized, soft and smelly" }), el("small", { text: "The treat ladder, the morning pot, and what never to give" })])),
+    el("div", { class: "acc-body" }, [el("p", { class: "note", text: T(C.treats.intro) }),
+      el("div", { class: "ladder" }, C.treats.ladder.map((x) => el("div", { class: "rung " + x.c }, [el("div", { class: "lvl", text: x.l }), el("div", {}, [el("b", { text: x.t }), el("p", { text: T(x.d) })])]))),
+      el("div", { class: "rota" }, C.treats.rota.map(([d, t], i) => el("div", { class: i === (today.getDay() + 6) % 7 ? "today" : "" }, [el("b", { text: d }), t]))),
+      el("p", { text: T(C.treats.pot) }),
+      el("div", { class: "callout danger" }, [el("b", { text: "Never give these" }), el("p", { text: C.treats.never })])])]));
+  P.append(el("div", { class: "eyebrow", text: "House rules" }));
+  P.append(el("div", { class: "card" }, el("ul", { class: "plain" }, C.rules.map((x) => el("li", { text: T(x) })))));
 }
 
 /* ---------- watch ---------- */
@@ -1274,6 +1387,7 @@ function renderWatch() {
 
 /* ---------- render ---------- */
 function renderAll() {
+  if (lessonId && !$("#p-lesson").hidden && !timer) renderLesson(lessonId, false);
   [["today", renderToday], ["skills", renderSkills], ["pack", renderPack]].forEach(([name, fn]) => {
     const open = [...document.querySelectorAll("#p-" + name + " details[open][id]")].map((d) => d.id);
     const y = window.scrollY;
@@ -1295,7 +1409,7 @@ function onState() {
     let start = "today";
     const h = (location.hash || "").slice(1);
     if (TABS.includes(h)) start = h; else { try { const t2 = sessionStorage.getItem("pt.tab"); if (TABS.includes(t2)) start = t2; } catch (e) {} }
-    if (!me()) renderWho(); else show(start);
+    if (!me()) renderWho(); else if (h.startsWith("lesson/") && skillById(h.slice(7))) renderLesson(h.slice(7), false); else show(start);
   }
   checkCelebrations();
 }

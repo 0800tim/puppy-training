@@ -440,3 +440,84 @@ button.vid{width:100%;border:1px solid var(--line);font:inherit;text-align:left;
   body.printing-cert .cert-sheet{box-shadow:none;width:100%;max-width:none;aspect-ratio:auto;height:100vh;border-radius:0}
   @page{size:A4 landscape;margin:12mm}
 }
+
+/* lessons: the course map */
+.lvl-head{display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-top:10px}
+.lvl-head .eyebrow{margin:0}
+.lessons{display:grid;gap:8px}
+.lesson{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:12px;align-items:center;width:100%;text-align:left;font:inherit;color:inherit;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:10px 12px;cursor:pointer;box-shadow:var(--shadow)}
+.lesson.current{border:2px solid var(--brand);background:var(--brand-soft)}
+.lesson.later{opacity:.62}
+.lesson:active{transform:scale(.99)}
+.lnum{width:36px;height:36px;border-radius:50%;display:grid;place-items:center;font-family:var(--font-display);font-weight:800;font-size:1.05rem;background:var(--sunk);color:var(--muted);flex:none}
+.lnum.current{background:var(--brand);color:#fff;box-shadow:0 4px 12px color-mix(in srgb,var(--brand) 35%,transparent)}
+.lnum.done{background:var(--good);color:#fff}
+.lnum .ic{width:20px;height:20px;stroke-width:2.4}
+.lesson .txt{min-width:0;display:grid;gap:1px}
+.lesson .txt b{font-family:var(--font-display);font-size:1.02rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lesson .txt small{color:var(--muted);font-size:.8rem}
+.lesson.current .txt small{color:var(--brand);font-weight:700}
+.lesson .thumb{width:76px;aspect-ratio:16/9;border-radius:8px;overflow:hidden;background:var(--line);flex:none;display:block}
+.lesson .thumb img{width:100%;height:100%;object-fit:cover;display:block}
+
+/* the next-lesson call to action on Today */
+.lesson-cta{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:12px;align-items:center;width:100%;text-align:left;font:inherit;color:inherit;background:var(--sunk);border:0;border-radius:16px;padding:10px;cursor:pointer;margin-top:12px}
+.lesson-cta:active{transform:scale(.99)}
+.lesson-cta .thumb{width:104px;aspect-ratio:16/9;border-radius:10px;overflow:hidden;position:relative;flex:none;display:block;background:var(--line)}
+.lesson-cta .thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.lesson-cta .thumb .play{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:30px;height:30px;border-radius:50%;background:var(--accent);box-shadow:0 2px 8px rgba(0,0,0,.3)}
+.lesson-cta .thumb .play::after{content:"";position:absolute;left:11px;top:8px;border-left:10px solid #fff;border-top:7px solid transparent;border-bottom:7px solid transparent}
+.lesson-cta .txt{min-width:0;display:grid;gap:2px}
+.lesson-cta .txt .eyebrow{margin:0}
+.lesson-cta .txt b{font-family:var(--font-display);font-size:1.2rem;line-height:1.15}
+.lesson-cta .txt small{color:var(--muted);font-size:.8rem}
+.lesson-cta>.ic{color:var(--muted)}
+.card.mine .slots{margin-top:12px}
+
+/* the lesson screen */
+.back{border:0;background:none;color:var(--brand);font-weight:800;font-family:var(--font-display);display:inline-flex;align-items:center;gap:2px;padding:4px 0;cursor:pointer;justify-self:start}
+.back .ic{transform:rotate(180deg);width:20px;height:20px}
+.card.lesson-hero{background:linear-gradient(135deg,var(--hero-a),var(--hero-b));color:var(--hero-ink);border:0;box-shadow:var(--glow);display:grid;gap:8px;position:relative;overflow:hidden}
+.card.lesson-hero::after{content:"";position:absolute;right:-60px;top:-70px;width:220px;height:220px;border-radius:50%;background:radial-gradient(circle at 30% 30%,rgba(255,255,255,.18),rgba(255,255,255,0) 70%)}
+.card.lesson-hero>*{position:relative}
+.card.lesson-hero .eyebrow,.card.lesson-hero .note,.card.lesson-hero small{color:rgba(255,255,255,.88)}
+.card.lesson-hero h2{font-size:2rem}
+.card.lesson-hero .pill{background:rgba(255,255,255,.18);color:#fff}
+.card.lesson-hero .pill.good{background:var(--sun);color:#1c1a33}
+.reps{display:inline-flex;gap:6px;align-items:center}
+.reps i{width:14px;height:14px;border-radius:50%;background:rgba(255,255,255,.3);display:block}
+.reps i.on{background:var(--sun)}
+.step{display:flex;align-items:center;gap:10px;margin-top:8px}
+.step .n{width:30px;height:30px;border-radius:50%;background:var(--brand);color:#fff;display:grid;place-items:center;font-family:var(--font-display);font-weight:800;flex:none}
+.step h3{font-size:1.12rem;flex:1}
+.step small{color:var(--muted);font-weight:700}
+.steps.big li{font-size:1rem}
+.steps.big li+li{margin-top:2px}
+
+/* big video card */
+.vhero{display:grid;width:100%;padding:0;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);overflow:hidden;box-shadow:var(--shadow);cursor:pointer;text-align:left;font:inherit;color:inherit}
+.vhero .cover{position:relative;aspect-ratio:16/9;background:#000;display:block}
+.vhero .cover img{width:100%;height:100%;object-fit:cover;display:block}
+.vhero .cover .play{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:64px;height:64px;border-radius:50%;background:var(--accent);box-shadow:0 6px 20px rgba(0,0,0,.35)}
+.vhero .cover .play::after{content:"";position:absolute;left:25px;top:18px;border-left:22px solid #fff;border-top:14px solid transparent;border-bottom:14px solid transparent}
+.vhero .cover .len{position:absolute;right:8px;bottom:8px;background:rgba(0,0,0,.72);color:#fff;font-size:.72rem;font-weight:800;padding:2px 7px;border-radius:6px}
+.vhero .cap{padding:10px 14px 12px;display:grid}
+.vhero .cap b{font-size:.98rem;line-height:1.25}
+.vhero .cap small{color:var(--muted);font-size:.8rem}
+.vhero.watched .cover::before{content:"✓ Watched";position:absolute;left:8px;top:8px;background:var(--good);color:#fff;font-size:.72rem;font-weight:800;padding:3px 9px;border-radius:99px;z-index:1}
+.vstrip{display:grid;gap:10px}
+@media (min-width:520px){.vstrip{grid-template-columns:repeat(3,minmax(0,1fr))} .vstrip .vhero .cover .play{width:44px;height:44px} .vstrip .vhero .cover .play::after{left:17px;top:12px;border-left-width:15px;border-top-width:10px;border-bottom-width:10px}}
+
+/* the 5-minute session timer */
+.card.timer{display:grid;gap:10px;justify-items:center;text-align:center;border:2px solid var(--brand)}
+.t-time{font-family:var(--font-display);font-weight:800;font-size:4.2rem;line-height:1;font-variant-numeric:tabular-nums;color:var(--brand)}
+.t-phase{font-family:var(--font-display);font-weight:800;font-size:1.25rem}
+.t-hint{margin:0;color:var(--muted);max-width:36ch}
+.t-dots{display:flex;gap:8px}
+.t-dots i{width:44px;height:7px;border-radius:4px;background:var(--sunk);display:block}
+.t-dots i.on{background:var(--brand)}
+
+/* biting: start here */
+.card.start{border:2px solid var(--accent);display:grid;gap:10px}
+.card.start .eyebrow{margin:0}
+.card.start .steps.big{margin-top:2px}

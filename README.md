@@ -2,7 +2,7 @@
 
 **The puppy training app for families.** Free, open source, reward-based, and built around the thing no other app does: everyone in the house trains the same puppy, with the same words, and the kids actually want to.
 
-Everyone does **5 minutes, 3 times a day**. The app deals each person a mission, keeps the whole family on one shared chart, and turns showing up into streaks, levels and badges for the humans while the puppy's own progress is the number the family wins together.
+Everyone does **5 minutes, 3 times a day**. The app walks each person through the same course of short lessons (watch a video, read the steps, train, tick it off), keeps the whole family on one shared chart, and turns showing up into streaks, levels and badges for the humans while the puppy's own progress is the number the family wins together.
 
 Made in New Zealand for a German Shorthaired Pointer x heading dog puppy who bites a lot, and for the three kids who are training her. Works for any puppy and any family.
 
@@ -28,17 +28,18 @@ And the loudest complaint about all of them is billing and lock-in. So this one 
 ## What's in it
 
 **Today**
-- Your three **missions** for the day, dealt from the skills that are open, rotating so that across a week every person touches every skill and the puppy gets the full spread.
+- Your **next lesson**, front and centre, with the video thumbnail and how many of its three sessions you have done. Tap it for the lesson page; the three slots underneath are for sessions you did without the timer.
 - Everyone's row with a progress ring, streak and level. Tick your own slot in one tap; logging for someone else asks first and records who did it.
 - The **puppy's progress** meter: ten puppy levels from Land Shark to Good Dog Graduate, fed by sessions, skills mastered, calm days and toilet wins. The dog is the team.
 - A daily **bite meter** (Angel to Shark) with a week sparkline, because the bite meter dropping is what the family actually wants.
 - A **toilet log**: wee, poo or accident, what came before, when the next trip is due for the puppy's age, and the pattern behind accidents.
 
-**Skills**
-- 23 skills as a **tree**, not a calendar. Sit opens Down and Stay; Come opens Hide and seek. A skill opens the moment someone has practised what it builds on, so a keen family moves fast and nobody waits for "week 5" to play find-it.
-- Each skill has steps, a lure animation where it helps, a "done when" goal, and short videos.
+**Lessons**
+- One **course for everyone**, 25 lessons in four levels: Puppy 101 (name, the "Yes!" marker, Sit, a soft mouth, Wait, Come, Stay), Good manners, Growing up, then Tricks and games. Everyone starts at lesson one and moves at their own pace; nobody picks a track.
+- Each lesson page is the same four steps: **watch** one short video chosen for that skill (every video checked live when it was added), **read** the steps with a lure animation where it helps, **train** with a 5-minute timer (warm-up, the lesson, play) that ticks the session off at the end, and, when the puppy nails it, **confirm the goal** with a witness.
+- Three sessions tick a lesson and open the next. A lesson the whole pack has mastered is ticked for everyone.
 - **Mastery takes three people and a witness.** That is where the big points are, so it is the one thing that needs a co-sign. It also makes every family member a generalisation step for the dog.
-- The 6-week plan is still there as a suggested path, plus the cue sheet, treat ladder, house rules and safe-socialising list.
+- Below the course: puppy preschool, the safe-socialising list, the first-year timeline and the health card.
 
 **Pack**
 - **Streaks** that one session a day keeps alive, with two automatic freezes a week. Missing a day is forgiven; coming back is celebrated.
@@ -141,7 +142,7 @@ npm test     # server and rewards-engine tests (node:test, no dependencies)
 npm run build
 ```
 
-- `public/` is the whole app: `index.html`, `styles.css`, `content.js` (all the training content), `rewards.js` (points, streaks, levels, badges, missions), `app.js`, `theme.js`, `sw.js` (offline shell) and `manifest.webmanifest`.
+- `public/` is the whole app: `index.html`, `styles.css`, `content.js` (all the training content), `rewards.js` (points, streaks, levels, badges, the course), `app.js`, `theme.js`, `sw.js` (offline shell) and `manifest.webmanifest`.
 - `server/server.js` is the optional PIN server, one file, no dependencies.
 - Bump `VERSION` in `public/sw.js` whenever you change files in `public/`, so installed phones pick up the update.
 

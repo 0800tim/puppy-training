@@ -80,15 +80,44 @@ test("streak freezes: two a week keep a streak alive, a third miss breaks it", (
   assert.equal(S.people.a.streak, 2);
 });
 
-test("missions rotate through open skills and cover everyone", () => {
-  const S = R.compute({ settings, ticks: {}, logs: {}, mastery: {}, toilet: [] }, C, { today: "2026-10-16" });
-  const open = Object.keys(S.skills).filter((k) => S.skills[k].open);
-  assert.ok(open.includes("name") && open.includes("yes") && !open.includes("sit"));
-  const m = S.missions;
-  assert.ok(m.a && m.a.am && open.includes(m.a.am.skill));
-  const seen = new Set();
-  for (let i = 0; i < 7; i++) { const mm = R.missions({ settings, ticks: {}, mastery: {} }, C, R.addDays("2026-10-16", i)); ["am", "pm", "ev"].forEach((s) => seen.add(mm.a[s].skill)); }
-  assert.equal(seen.size, open.length, "a week covers every open skill for one person");
+test("the course: everyone starts at lesson one, three sessions tick a lesson, mastery skips it, missions follow", () => {
+  const order = [].concat(...C.course.levels.map((l) => l.skills));
+  assert.equal(order[0], "name"); assert.ok(order.indexOf("sit") < order.indexOf("down"), "basics before the harder asks");
+  let S = R.compute({ settings, ticks: {}, logs: {}, mastery: {}, toilet: [] }, C, { today: "2026-10-16" });
+  assert.deepEqual(S.course.order, order);
+  assert.equal(S.course.people.a.current, "name"); assert.equal(S.course.people.a.done, 0); assert.equal(S.course.people.a.total, order.length);
+  assert.equal(S.course.people.a.lessons.name.status, "current"); assert.equal(S.course.people.a.lessons.yes.status, "later");
+  assert.equal(S.missions.a.am.skill, "name"); assert.equal(S.missions.a.ev.skill, "name"); assert.equal(S.missions.a.am.warm, null);
+  // Ava does the name game three times; Mum has done it once
+  const ticks = {};
+  ["2026-10-14_a_am", "2026-10-14_a_pm", "2026-10-15_a_am"].forEach((k) => { ticks[k] = { at: 1, by: "a", skill: "name" }; });
+  ticks["2026-10-15_m_am"] = { at: 1, by: "m", skill: "name" };
+  ticks["2026-10-15_a_pm"] = { at: 1, by: "a", skill: "name", void: true };
+  S = R.compute({ settings, ticks, logs: {}, mastery: {}, toilet: [] }, C, { today: "2026-10-16" });
+  assert.equal(S.course.people.a.lessons.name.status, "done"); assert.equal(S.course.people.a.lessons.name.count, 3);
+  assert.equal(S.course.people.a.current, "yes"); assert.equal(S.course.people.a.done, 1);
+  assert.equal(S.missions.a.pm.skill, "yes"); assert.equal(S.missions.a.pm.warm, "name", "the warm-up is the lesson before");
+  assert.equal(S.course.people.m.current, "name"); assert.equal(S.course.people.m.lessons.name.count, 1, "Mum is on her own path, and the void row does not count for Ava");
+  // the pack masters Sit: that lesson is done for everyone, even with no sessions
+  const mastery = { sit: { done: [{ by: "a", witness: "m", at: 1 }, { by: "m", witness: "a", at: 2 }, { by: "b", witness: "a", at: 3 }] } };
+  S = R.compute({ settings, ticks, logs: {}, mastery, toilet: [] }, C, { today: "2026-10-16" });
+  assert.equal(S.course.people.m.lessons.sit.done, true); assert.equal(S.course.people.m.lessons.sit.mastered, true);
+  assert.equal(S.course.people.m.current, "name");
+  // a graduate revises: missions rotate through the whole course
+  const all = {}; let d = "2026-09-01";
+  order.forEach((id) => { ["am", "pm", "ev"].forEach((s) => { all[d + "_a_" + s] = { at: 1, by: "a", skill: id }; }); d = R.addDays(d, 1); });
+  S = R.compute({ settings, ticks: all, logs: {}, mastery: {}, toilet: [] }, C, { today: "2026-10-16" });
+  assert.equal(S.course.people.a.graduated, true); assert.equal(S.course.people.a.current, null);
+  const seen = new Set(); for (let i = 0; i < 9; i++) ["am", "pm", "ev"].forEach((s) => seen.add(R.missions({ settings, ticks: all, mastery: {} }, C, R.addDays("2026-10-16", i))[ "a"][s].skill));
+  assert.equal(seen.size, order.length, "nine days of revision cover every lesson");
+});
+
+test("content: every lesson has a live-checked hero video, every video id is in the library, no lesson is listed twice", () => {
+  const order = [].concat(...C.course.levels.map((l) => l.skills));
+  assert.equal(new Set(order).size, order.length);
+  C.skills.forEach((s) => { assert.ok(order.includes(s.id), s.id + " is in the course"); assert.ok(C.videos[s.hero], s.id + " hero"); s.v.forEach((v) => assert.ok(C.videos[v], s.id + " " + v)); assert.ok(!s.v.includes(s.hero), s.id + " hero not repeated"); (s.req || []).forEach((r) => assert.ok(order.indexOf(r) < order.indexOf(s.id), s.id + " comes after " + r)); });
+  [].concat(C.course.intro.v, C.bitingStart.v, C.bitingStart.shorts, ...C.watch.map((w) => w.v), ...C.biting.map((b) => b.v), ...C.problems.map((p) => p.v), ...C.trainers.map((t) => t.v)).forEach((v) => assert.ok(C.videos[v], v));
+  Object.keys(C.videos).forEach((id) => assert.match(id, /^[A-Za-z0-9_-]{11}$/));
 });
 
 /* ---------- edge cases (burn round 5) ---------- */

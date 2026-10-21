@@ -184,7 +184,7 @@ test("two stashes at once, today's text tally, and a restart: the older purge cl
   const fam = FAMILY.map((m) => Object.assign({}, m, m.id === "dad" ? { buddy: "bo" } : {}));
   const first = await boot({ family: fam });
   first.stop(true);
-  const today = new Date().toISOString().slice(0, 10);
+  const d0 = new Date(), today = d0.getFullYear() + "-" + String(d0.getMonth() + 1).padStart(2, "0") + "-" + String(d0.getDate()).padStart(2, "0"); // the server's local day, not UTC
   const seeded = JSON.parse(fs.readFileSync(path.join(first.dir, "store.json"), "utf8"));
   seeded.sent = { date: today, by: { "sms:dad": ["sms"], "sms:mum": ["sms"] } }; // what the notifier writes after an afternoon text
   fs.writeFileSync(path.join(first.dir, "store.json"), JSON.stringify(seeded));
