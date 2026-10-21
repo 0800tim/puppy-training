@@ -130,6 +130,7 @@ Then put HTTPS in front of it (Caddy, nginx, a Cloudflare Tunnel or Tailscale Fu
 - Sessions are signed, HttpOnly, SameSite=Strict cookies. Writes must be JSON, which blocks cross-site form tricks.
 - Each phone picks who it belongs to; the server signs that choice into a cookie and ignores any identity a request claims. Grown-up status comes from the family record, never from the phone. Set `PUPPY_ADULT_PIN` and picking a grown-up asks for it.
 - Once a grown-up exists, only grown-ups can change the family, goals, phone numbers and the puppy's photo. Kids can't log past days. You can undo your own entries for 15 minutes; a grown-up can undo anything.
+- A grown-up can remove a person and everything they logged from Settings, with a 15-minute undo. After that the person's id is purged from the chart. See docs/PRIVACY.md.
 - Push subscriptions are only accepted for real browser push services, and there is a hard cap of 40 phones. See [`docs/SECURITY-REVIEW-2026-10.md`](docs/SECURITY-REVIEW-2026-10.md).
 - A short PIN is a family front-door lock, not bank security. It keeps strangers out of your chart. Don't store anything secret in it.
 

@@ -121,9 +121,10 @@ function createApp(opts = {}) {
 
   /* ---------- store ---------- */
   const storeFile = path.join(dataDir, "store.json");
-  let db = { rev: 1, settings: null, ticks: {}, logs: {}, mastery: {}, toilet: [], push: [], sent: null, social: {}, share: null, health: [], teach: [] };
+  let db = { rev: 1, settings: null, ticks: {}, logs: {}, mastery: {}, toilet: [], push: [], sent: null, social: {}, share: null, health: [], teach: [], removals: [] };
   if (fs.existsSync(storeFile)) { try { db = Object.assign(db, JSON.parse(fs.readFileSync(storeFile, "utf8"))); } catch (e) { log("store.json unreadable, starting fresh:", e.message); } }
   function persist(bump = true) {
+    purgeRemovals();
     if (bump) db.rev++;
     const tmp = storeFile + "." + process.pid + ".tmp";
     fs.writeFileSync(tmp, JSON.stringify(db));
@@ -132,7 +133,8 @@ function createApp(opts = {}) {
   const photoFile = path.join(dataDir, "photo.jpg");
   const stateOut = () => ({ rev: db.rev, settings: db.settings, ticks: db.ticks, logs: db.logs, mastery: db.mastery, toilet: db.toilet.slice(-300), social: db.social || {}, health: (db.health || []).filter((h) => !h.void), photo: fs.existsSync(photoFile), today: localToday(),
     teach: (db.teach || []).filter((t) => !t.void).slice(-200),
-    push: (db.push || []).map((s) => ({ id: s.id, pid: s.pid, prefs: s.prefs || {}, created: s.created, label: s.label || "" })), sms: !!smsSender, vapid: vapid.publicKey, share: db.share ? { token: db.share.token, created: db.share.created } : null });
+    push: (db.push || []).map((s) => ({ id: s.id, pid: s.pid, prefs: s.prefs || {}, created: s.created, label: s.label || "" })), sms: !!smsSender, vapid: vapid.publicKey, share: db.share ? { token: db.share.token, created: db.share.created } : null,
+    removals: (db.removals || []).filter((r) => now() - r.at <= UNDO_MS).map((r) => ({ id: r.person.id, name: r.person.name, at: r.at, counts: r.counts })) });
   /* ---------- push keys, notifier ---------- */
   const vapidFile = path.join(dataDir, "vapid.json");
   let vapid;
@@ -141,6 +143,65 @@ function createApp(opts = {}) {
   const smsSender = opts.sms === null ? null : (opts.sms || NOTIFY.makeSmsSender(process.env));
   const notifier = opts.noScheduler ? null : NOTIFY.createNotifier({ db, C: CONTENT, R: REWARDS, keys: vapid, subject: pushSubject, log, persist, sendPush: opts.sendPush || PUSH.sendPush, sendSms: smsSender || (async () => { throw new Error("no SMS gateway configured"); }), now: opts.now ? () => new Date(now()) : undefined });
   const member = (id) => (db.settings && db.settings.family.find((m) => m.id === id)) || null;
+
+  /* ---------- "remove this person and their history" (docs/design/REMOVE-PERSON.md) ----------
+   * Void everything they logged with a removal stamp, drop their phones' reminders, keep an undo for UNDO_MS,
+   * then purge their id from every row. Void rows stay (toilet patterns, the puppy's health record) but say nothing about who. */
+  const eachEntry = (fn) => {
+    for (const k in db.ticks) fn(db.ticks[k], k);
+    for (const d in db.logs) fn(db.logs[d]);
+    for (const sk in db.mastery) ((db.mastery[sk] && db.mastery[sk].done) || []).forEach((v) => fn(v));
+    (db.toilet || []).forEach((t) => fn(t));
+    for (const item in db.social || {}) (db.social[item] || []).forEach((x) => fn(x));
+    (db.health || []).forEach((h) => fn(h));
+    (db.teach || []).forEach((t) => fn(t));
+  };
+  function removePerson(who, by) {
+    const pid = who.id;
+    const r = { id: crypto.randomBytes(6).toString("hex"), at: now(), by, person: Object.assign({}, who), buddies: [], push: [], counts: { sessions: 0, votes: 0, witnessed: 0, trips: 0, social: 0, health: 0, lessons: 0 } };
+    db.settings.family = db.settings.family.filter((m) => m.id !== pid);
+    db.settings.family.forEach((m) => { if (m.buddy === pid) { r.buddies.push(m.id); m.buddy = ""; } });
+    const stamp = (x, what) => { if (x && !x.void) { x.void = true; x.removed = r.id; r.counts[what]++; } };
+    eachEntry((x, key) => {
+      if (key) { if (key.split("_")[1] === pid) stamp(x, "sessions"); return; } // ticks they logged on someone else's row stay with that row
+      if ("bite" in x) return; // a bite rating is about the puppy; the id goes at purge time
+      if ("witness" in x) { if (x.by === pid) stamp(x, "votes"); else if (x.witness === pid && !x.void) { x.witness = ""; x.removedWitness = r.id; r.counts.witnessed++; } return; }
+      if ("teacher" in x) { if (x.teacher === pid || x.learner === pid) stamp(x, "lessons"); return; }
+      if (x.by === pid) stamp(x, "kind" in x && "date" in x ? "health" : "mood" in x ? "social" : "trips");
+    });
+    r.push = (db.push || []).filter((s) => s.pid === pid);
+    db.push = (db.push || []).filter((s) => s.pid !== pid);
+    db.removals = (db.removals || []).concat(r);
+    return r;
+  }
+  function restorePerson(r) {
+    db.settings.family.push(r.person);
+    db.settings.family.forEach((m) => { if (r.buddies.includes(m.id) && !m.buddy) m.buddy = r.person.id; });
+    eachEntry((x) => {
+      if (x.removed === r.id) { delete x.void; delete x.removed; }
+      if (x.removedWitness === r.id) { x.witness = r.person.id; delete x.removedWitness; }
+    });
+    r.push.forEach((s) => { if (!(db.push || []).some((x) => x.id === s.id)) db.push.push(s); });
+    db.removals = db.removals.filter((x) => x.id !== r.id);
+  }
+  function purgeRemovals() {
+    const due = (db.removals || []).filter((r) => now() - r.at > UNDO_MS);
+    if (!due.length) return;
+    due.forEach((r) => {
+      const pid = r.person.id;
+      for (const k in db.ticks) if (k.split("_")[1] === pid) delete db.ticks[k];
+      for (const sk in db.mastery) if (db.mastery[sk]) db.mastery[sk].done = (db.mastery[sk].done || []).filter((v) => v.by !== pid);
+      db.teach = (db.teach || []).filter((t) => t.teacher !== pid && t.learner !== pid);
+      eachEntry((x) => {
+        if (x.by === pid) x.by = "";
+        if (x.witness === pid) x.witness = "";
+        if (x.removed === r.id) delete x.removed;
+        if (x.removedWitness === r.id) delete x.removedWitness;
+      });
+    });
+    db.removals = db.removals.filter((r) => !due.includes(r));
+  }
+  purgeRemovals(); // a stash left from before a restart
 
   function cleanSettings(x) {
     if (!x || typeof x !== "object") return null;
@@ -432,6 +493,30 @@ function createApp(opts = {}) {
       }
       if (t.learner !== me.id) return send(res, 403, { error: "Only " + (member(t.learner) || { name: "the learner" }).name + " can confirm that" });
       if (!t.confirmed) t.confirmed = now();
+      persist(); return send(res, 200, out());
+    }
+    // "Remove this person and their history": grown-up once one exists, never yourself, never the last grown-up while kids remain. Undo for 15 minutes.
+    if ((m = p.match(/^\/api\/family\/([A-Za-z0-9]{1,24})$/)) && req.method === "DELETE") {
+      if (!me) return needMe();
+      if (hasAdult && !isAdult) return send(res, 403, { error: "Ask a grown-up to remove someone" });
+      const who = member(m[1]);
+      if (!who) return send(res, 404, { error: "Not found" });
+      if (who.id === me.id) return send(res, 400, { error: "You can't remove yourself. Ask another grown-up." });
+      const fam = db.settings.family;
+      if (who.kind === "adult" && fam.filter((x) => x.kind === "adult").length === 1 && fam.some((x) => x.kind !== "adult")) return send(res, 400, { error: "The last grown-up stays while there are kids on the chart" });
+      const r = removePerson(who, me.id);
+      log("removed", who.id, "by", me.id, JSON.stringify(r.counts));
+      persist(); return send(res, 200, out());
+    }
+    if ((m = p.match(/^\/api\/family\/([A-Za-z0-9]{1,24})\/restore$/)) && req.method === "POST") {
+      if (!me) return needMe();
+      if (hasAdult && !isAdult) return send(res, 403, { error: "Ask a grown-up to undo that" });
+      const r = (db.removals || []).find((x) => x.person.id === m[1]);
+      if (!r || now() - r.at > UNDO_MS) return send(res, 404, { error: "Too late to undo. Add them again as a new person." });
+      if (member(m[1])) return send(res, 409, { error: "They are already back" });
+      if (db.settings.family.length >= 6) return send(res, 409, { error: "Up to 6 people. Remove someone else first." });
+      restorePerson(r);
+      log("restored", m[1], "by", me.id);
       persist(); return send(res, 200, out());
     }
     if (p === "/api/share" && req.method === "POST") {

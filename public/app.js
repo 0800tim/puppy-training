@@ -56,7 +56,7 @@ function T(str) {
 }
 
 /* ---------- state ---------- */
-const S = { settings: null, ticks: {}, logs: {}, mastery: {}, toilet: [], photo: false, scores: null, push: [], sms: false, vapid: "", social: {}, me: undefined, adultPin: false, health: [], teach: [] };
+const S = { settings: null, ticks: {}, logs: {}, mastery: {}, toilet: [], photo: false, scores: null, push: [], sms: false, vapid: "", social: {}, me: undefined, adultPin: false, health: [], teach: [], removals: [] };
 let store = null;
 let viewDay = new Date(today);
 let staticKey = "";
@@ -146,7 +146,7 @@ class ServerStore {
     this.rev = j.rev;
     S.settings = j.settings || null;
     S.ticks = j.ticks || {}; S.logs = j.logs || {}; S.mastery = j.mastery || {}; S.toilet = j.toilet || [];
-    S.push = j.push || []; S.sms = !!j.sms; S.vapid = j.vapid || ""; S.social = j.social || {}; S.adultPin = !!j.adultPin; S.share = j.share || null; S.health = j.health || []; S.teach = j.teach || [];
+    S.push = j.push || []; S.sms = !!j.sms; S.vapid = j.vapid || ""; S.social = j.social || {}; S.adultPin = !!j.adultPin; S.share = j.share || null; S.health = j.health || []; S.teach = j.teach || []; S.removals = j.removals || [];
     if ("me" in j) { S.me = j.me; if (j.me && j.me !== meId) { meId = j.me; lsSet("pt.me", j.me); } }
     if (j.photo !== S.photo) { S.photo = !!j.photo; this.photoBust = Date.now(); }
     this.cb();
@@ -200,6 +200,8 @@ class ServerStore {
   confirmTeach(id) { return this.write("PUT", "api/teach/" + id, {}); }
   voidTeach(id) { return this.write("DELETE", "api/teach/" + id); }
   dropShare() { return this.write("DELETE", "api/share"); }
+  removePerson(id) { return this.write("DELETE", "api/family/" + id); }
+  restorePerson(id) { return this.write("POST", "api/family/" + id + "/restore", {}); }
   addToilet(x) { return this.write("POST", "api/toilet", x); }
   voidToilet(id) { return this.write("DELETE", "api/toilet/" + id); }
   setPhoto(data) { return data ? this.write("PUT", "api/photo", { data }) : this.write("DELETE", "api/photo"); }
@@ -423,7 +425,7 @@ function renderSettings(firstRun) {
           el("input", { type: "tel", placeholder: "Mobile (for texts)", value: p.phone || "", "aria-label": "Mobile number", style: "flex:1;min-width:150px", oninput: (e) => (p.phone = e.target.value) }),
           el("label", { class: "target" }, [el("input", { type: "checkbox", checked: !!p.sms, onchange: (e) => (p.sms = e.target.checked) }), " text " + (p.name || "them")])]) : null
       ]),
-      fam.length > 1 ? el("button", { class: "iconbtn", type: "button", "aria-label": "Remove " + (p.name || "person"), text: "✕", onclick: () => { fam.splice(i, 1); drawFam(); } }) : null
+      fam.length > 1 ? el("button", { class: "iconbtn", type: "button", "aria-label": "Remove " + (p.name || "person"), text: "✕", onclick: () => { if (store.mode === "server" && family().some((o) => o.id === p.id)) removePerson(p); else { fam.splice(i, 1); drawFam(); } } }) : null
     ])));
   };
   drawFam();
@@ -481,6 +483,9 @@ function renderSettings(firstRun) {
       el("div", { class: "card" }, [el("ul", { class: "plain" }, family().map((p) => el("li", { text: p.name + " · " + (C.kinds[p.kind] ? C.kinds[p.kind].name : "") + " · goal " + (p.target || C.kinds[p.kind].target) + " a week" }))),
         el("p", { class: "note", style: "margin-top:8px", text: "Ask a grown-up to change names, goals or the puppy's details." })]));
   } else {
+    (S.removals || []).forEach((r) => P.append(el("div", { class: "card", style: "display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap" }, [
+      el("span", { text: r.name + " was removed " + ago(r.at) + ". Undo puts back everything they logged." }),
+      el("button", { class: "btn ghost", type: "button", text: "Undo", onclick: () => safe(async () => { await store.restorePerson(r.id); renderHeader(); renderSettings(false); }, r.name + " is back") })])));
     P.append(
       el("div", { class: "eyebrow", text: "Who's training" }),
       el("div", { class: "card", style: "display:grid;gap:10px" }, [famBox, addBtn,
@@ -507,6 +512,20 @@ function renderSettings(firstRun) {
     P.append(el("div", { class: "eyebrow", text: "Reminders" }), renderNotifCard());
     if (isAdult(me())) P.append(el("div", { class: "eyebrow", text: "Visitor card" }), renderShareCard());
   }
+}
+
+/* "Remove this person and their history": the server voids everything they logged and keeps an undo for 15 minutes (docs/design/REMOVE-PERSON.md).
+   A row that has not been saved yet is just dropped from the form. */
+function removePerson(p) {
+  const live = (x) => !!x && !x.void;
+  const sessions = Object.keys(S.ticks).filter((k) => k.split("_")[1] === p.id && live(S.ticks[k])).length;
+  const votes = Object.values(S.mastery).reduce((a, e) => a + ((e && e.done) || []).filter((v) => v.by === p.id && live(v)).length, 0);
+  const trips = S.toilet.filter((t) => t.by === p.id && live(t)).length;
+  const lessons = S.teach.filter((t) => (t.teacher === p.id || t.learner === p.id) && live(t)).length;
+  const bits = [[sessions, "session"], [votes, "skill vote"], [trips, "toilet trip"], [lessons, "lesson"]].filter(([n]) => n > 0).map(([n, w]) => n + " " + w + (n === 1 ? "" : "s"));
+  const what = bits.length ? " That is " + bits.join(", ") + "." : "";
+  if (!confirm("Remove " + p.name + " and everything they logged?" + what + " You can undo this from Settings for 15 minutes.")) return;
+  safe(async () => { await store.removePerson(p.id); renderHeader(); renderSettings(false); }, p.name + " removed. Undo is at the top of Settings for 15 minutes.");
 }
 
 /* ---------- the visitor card: a link for grandparents and sitters ---------- */
