@@ -34,7 +34,7 @@ client when the person is added. It appears in:
 | `teach[]` | `teacher` | They claimed to teach | The learner's learn points |
 | `teach[]` | `learner` | They were taught | The teacher's teach points and sensei badges |
 | `push[]` | `pid` | A phone subscribed as this person | That phone's reminders |
-| `sent.by` | keyed by subscription id, not person | Today's nudge bookkeeping | Resets tomorrow |
+| `sent.by` | push rows are keyed by subscription id, but the SMS row is `sms:<pid>` | Today's nudge bookkeeping | Goes with the person at removal, comes back on undo (found in the 21 October review) |
 | Client `localStorage` | `pt.me` | A phone remembering it is this person | That phone |
 | Cookie `pt_me` | signed id | Same, server-side | That phone |
 | Exports | names and ids in JSON; names in CSV and on the certificate | Files already downloaded | Out of reach |
