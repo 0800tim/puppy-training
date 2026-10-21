@@ -124,7 +124,7 @@ function createApp(opts = {}) {
   let db = { rev: 1, settings: null, ticks: {}, logs: {}, mastery: {}, toilet: [], push: [], sent: null, social: {}, share: null, health: [], teach: [], removals: [] };
   if (fs.existsSync(storeFile)) { try { db = Object.assign(db, JSON.parse(fs.readFileSync(storeFile, "utf8"))); } catch (e) { log("store.json unreadable, starting fresh:", e.message); } }
   function persist(bump = true) {
-    purgeRemovals();
+    if (purgeRemovals()) bump = true; // phones must see the purged rows
     if (bump) db.rev++;
     const tmp = storeFile + "." + process.pid + ".tmp";
     fs.writeFileSync(tmp, JSON.stringify(db));
@@ -158,7 +158,7 @@ function createApp(opts = {}) {
   };
   function removePerson(who, by) {
     const pid = who.id;
-    const r = { id: crypto.randomBytes(6).toString("hex"), at: now(), by, person: Object.assign({}, who), buddies: [], push: [], counts: { sessions: 0, votes: 0, witnessed: 0, trips: 0, social: 0, health: 0, lessons: 0 } };
+    const r = { id: crypto.randomBytes(6).toString("hex"), at: now(), by, person: Object.assign({}, who), index: db.settings.family.findIndex((m) => m.id === pid), buddies: [], push: [], sent: null, counts: { sessions: 0, votes: 0, witnessed: 0, trips: 0, social: 0, health: 0, lessons: 0 } };
     db.settings.family = db.settings.family.filter((m) => m.id !== pid);
     db.settings.family.forEach((m) => { if (m.buddy === pid) { r.buddies.push(m.id); m.buddy = ""; } });
     const stamp = (x, what) => { if (x && !x.void) { x.void = true; x.removed = r.id; r.counts[what]++; } };
@@ -171,22 +171,25 @@ function createApp(opts = {}) {
     });
     r.push = (db.push || []).filter((s) => s.pid === pid);
     db.push = (db.push || []).filter((s) => s.pid !== pid);
+    if (db.sent && db.sent.by && db.sent.by["sms:" + pid]) { r.sent = db.sent.by["sms:" + pid]; delete db.sent.by["sms:" + pid]; } // today's text tally is keyed by person id
     db.removals = (db.removals || []).concat(r);
     return r;
   }
   function restorePerson(r) {
-    db.settings.family.push(r.person);
+    if (r.person.buddy && !db.settings.family.some((m) => m.id === r.person.buddy)) r.person.buddy = ""; // their buddy may have gone in the meantime
+    db.settings.family.splice(Math.min(r.index >= 0 ? r.index : db.settings.family.length, db.settings.family.length), 0, r.person); // back in their place: chart order, colours and missions depend on it
     db.settings.family.forEach((m) => { if (r.buddies.includes(m.id) && !m.buddy) m.buddy = r.person.id; });
     eachEntry((x) => {
       if (x.removed === r.id) { delete x.void; delete x.removed; }
       if (x.removedWitness === r.id) { x.witness = r.person.id; delete x.removedWitness; }
     });
     r.push.forEach((s) => { if (!(db.push || []).some((x) => x.id === s.id)) db.push.push(s); });
+    if (r.sent && db.sent && db.sent.by && !db.sent.by["sms:" + r.person.id]) db.sent.by["sms:" + r.person.id] = r.sent;
     db.removals = db.removals.filter((x) => x.id !== r.id);
   }
   function purgeRemovals() {
     const due = (db.removals || []).filter((r) => now() - r.at > UNDO_MS);
-    if (!due.length) return;
+    if (!due.length) return false;
     due.forEach((r) => {
       const pid = r.person.id;
       for (const k in db.ticks) if (k.split("_")[1] === pid) delete db.ticks[k];
@@ -198,10 +201,14 @@ function createApp(opts = {}) {
         if (x.removed === r.id) delete x.removed;
         if (x.removedWitness === r.id) delete x.removedWitness;
       });
+      db.settings.family.forEach((m) => { if (m.buddy === pid) m.buddy = ""; });
+      db.removals.forEach((o) => { if (o.person.buddy === pid) o.person.buddy = ""; if (o.by === pid) o.by = ""; }); // a stash still open may point at them
+      if (db.sent && db.sent.by) delete db.sent.by["sms:" + pid];
     });
     db.removals = db.removals.filter((r) => !due.includes(r));
+    return true;
   }
-  purgeRemovals(); // a stash left from before a restart
+  if (purgeRemovals()) persist(); // a stash left from before a restart
 
   function cleanSettings(x) {
     if (!x || typeof x !== "object") return null;
@@ -340,6 +347,8 @@ function createApp(opts = {}) {
       if (hasAdult && !isAdult) return send(res, 403, { error: "Ask a grown-up to change the family" });
       const s = cleanSettings(await readJson(req));
       if (!s) return send(res, 400, { error: "Need at least one family member" });
+      const stale = s.family.find((m) => (db.removals || []).some((r) => r.person.id === m.id)); // a Settings page opened before someone was removed
+      if (stale) return send(res, 409, { error: stale.name + " was just removed. Reload, then use Undo in Settings to bring them back." });
       db.settings = s; persist(); return send(res, 200, out());
     }
     if ((m = p.match(/^\/api\/ticks\/([^/]+)$/)) && req.method === "PUT") {
@@ -501,9 +510,7 @@ function createApp(opts = {}) {
       if (hasAdult && !isAdult) return send(res, 403, { error: "Ask a grown-up to remove someone" });
       const who = member(m[1]);
       if (!who) return send(res, 404, { error: "Not found" });
-      if (who.id === me.id) return send(res, 400, { error: "You can't remove yourself. Ask another grown-up." });
-      const fam = db.settings.family;
-      if (who.kind === "adult" && fam.filter((x) => x.kind === "adult").length === 1 && fam.some((x) => x.kind !== "adult")) return send(res, 400, { error: "The last grown-up stays while there are kids on the chart" });
+      if (who.id === me.id) return send(res, 400, { error: "You can't remove yourself. Ask another grown-up." }); // so the last grown-up always stays
       const r = removePerson(who, me.id);
       log("removed", who.id, "by", me.id, JSON.stringify(r.counts));
       persist(); return send(res, 200, out());

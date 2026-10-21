@@ -11,9 +11,9 @@ const R = require("../public/rewards.js");
 
 const PIN = "482913";
 const FAMILY = [{ id: "kim", name: "Kim", kind: "kid", buddy: "dad" }, { id: "bo", name: "Bo", kind: "kid" }, { id: "mum", name: "Mum", kind: "adult" }, { id: "dad", name: "Dad", kind: "adult" }];
-async function boot() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pt-"));
-  let skew = 0;
+async function boot(opts = {}) {
+  const dir = opts.dir || fs.mkdtempSync(path.join(os.tmpdir(), "pt-")); // pass a dir to restart on the same store
+  let skew = opts.skew || 0;
   const server = createApp({ pin: PIN, dataDir: dir, log: () => {}, noScheduler: true, limits: { perIp: 50, global: 500 }, now: () => Date.now() + skew });
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
   const base = "http://127.0.0.1:" + server.address().port;
@@ -24,10 +24,10 @@ async function boot() {
     return { status: r.status, json: j, cookie: r.headers.get("set-cookie") };
   };
   const session = (await call("POST", "/api/login", { pin: PIN })).cookie.split(";")[0];
-  await call("PUT", "/api/settings", { puppy: { name: "Pip", sex: "girl", born: "2026-08-14" }, start: "2026-10-01", family: FAMILY }, session);
+  if (!opts.dir) await call("PUT", "/api/settings", { puppy: { name: "Pip", sex: "girl", born: "2026-08-14" }, start: "2026-10-01", family: opts.family || FAMILY }, session);
   const as = async (pid) => session + "; " + (await call("POST", "/api/me", { pid }, session)).cookie.split(";")[0];
   const store = () => JSON.parse(fs.readFileSync(path.join(dir, "store.json"), "utf8"));
-  return { call, session, as, store, skew: (ms) => { skew = ms; }, stop: () => { server.close(); fs.rmSync(dir, { recursive: true, force: true }); } };
+  return { call, session, as, store, skew: (ms) => { skew = ms; }, dir, stop: (keep) => { server.close(); if (!keep) fs.rmSync(dir, { recursive: true, force: true }); } };
 }
 const sub = (n) => ({ endpoint: "https://updates.push.services.mozilla.com/wpush/v2/" + n, keys: { p256dh: "x", auth: "y" } });
 
@@ -103,7 +103,8 @@ test("gates: a kid cannot remove anyone, nobody removes themselves, the last gro
     const dadBack = await app.call("POST", "/api/family/dad/restore", {}, mum);
     assert.equal(dadBack.status, 200);
     assert.equal((await app.call("DELETE", "/api/family/mum", undefined, (await app.as("dad")))).status, 200, "another grown-up can remove Mum while Dad remains");
-    assert.equal((await app.call("DELETE", "/api/family/dad", undefined, (await app.as("dad")))).status, 400, "Dad is now the last grown-up");
+    const last = await app.call("DELETE", "/api/family/dad", undefined, (await app.as("dad")));
+    assert.equal(last.status, 400, "Dad is now the last grown-up"); assert.match(last.json.error, /remove yourself/, "and that is what keeps him: nobody removes themselves");
     assert.equal((await app.call("POST", "/api/family/mum/restore", {}, kim)).status, 403, "a kid cannot undo either");
     assert.equal((await app.call("POST", "/api/family/nobody/restore", {}, (await app.as("dad")))).status, 404);
   } finally { app.stop(); }
@@ -144,6 +145,8 @@ test("undo within 15 minutes puts the store back exactly; after the window it is
     assert.equal(db.health[0].by, ""); assert.equal(db.health[0].void, true);
     assert.equal(db.teach.length, 0);
     assert.doesNotThrow(() => R.compute(db, C, { today }), "the engine is happy with cleared witnesses and void rows");
+    const named = JSON.parse(JSON.stringify(db)); named.ticks[today + "_kim_pm"].by = "dad";
+    assert.equal(R.compute(db, C, { today }).people.kim.points, R.compute(named, C, { today }).people.kim.points, "a session with its author purged still scores as logged by someone else");
   } finally { app.stop(); }
 });
 
@@ -157,4 +160,68 @@ test("undo is refused when the family is full again", async () => {
     const r = await app.call("POST", "/api/family/dad/restore", {}, mum);
     assert.equal(r.status, 409); assert.match(r.json.error, /Up to 6/);
   } finally { app.stop(); }
+});
+
+test("undo puts a middle member back in their place; a Settings page opened before the removal cannot re-add them", async () => {
+  const app = await boot();
+  try {
+    const dad = await app.as("dad");
+    const snapshot = app.store();
+    assert.equal((await app.call("DELETE", "/api/family/mum", undefined, dad)).status, 200);
+    const stale = await app.call("PUT", "/api/settings", { puppy: { name: "Pip", sex: "girl", born: "2026-08-14" }, start: "2026-10-01", family: FAMILY }, dad);
+    assert.equal(stale.status, 409, "the old family list still has Mum in it"); assert.match(stale.json.error, /Mum was just removed/);
+    assert.equal(app.store().settings.family.length, 3, "nothing applied");
+    const back = await app.call("POST", "/api/family/mum/restore", {}, dad);
+    assert.equal(back.status, 200);
+    assert.deepEqual(back.json.settings.family.map((m) => m.id), ["kim", "bo", "mum", "dad"], "same order, so colours and missions are unchanged");
+    const after = app.store(); delete snapshot.rev; delete after.rev;
+    assert.deepStrictEqual(after, snapshot);
+    assert.equal((await app.call("PUT", "/api/settings", { puppy: { name: "Pip", sex: "girl", born: "2026-08-14" }, start: "2026-10-01", family: FAMILY }, dad)).status, 200, "and the same save is fine once she is back");
+  } finally { app.stop(); }
+});
+
+test("two stashes at once, today's text tally, and a restart: the older purge clears what the newer stash still points at", async () => {
+  const fam = FAMILY.map((m) => Object.assign({}, m, m.id === "dad" ? { buddy: "bo" } : {}));
+  const first = await boot({ family: fam });
+  first.stop(true);
+  const today = new Date().toISOString().slice(0, 10);
+  const seeded = JSON.parse(fs.readFileSync(path.join(first.dir, "store.json"), "utf8"));
+  seeded.sent = { date: today, by: { "sms:dad": ["sms"], "sms:mum": ["sms"] } }; // what the notifier writes after an afternoon text
+  fs.writeFileSync(path.join(first.dir, "store.json"), JSON.stringify(seeded));
+  const app = await boot({ dir: first.dir });
+  try {
+    const mum = await app.as("mum");
+    assert.equal((await app.call("DELETE", "/api/family/dad", undefined, mum)).status, 200);
+    assert.deepEqual(Object.keys(app.store().sent.by), ["sms:mum"], "his text tally goes with him");
+    assert.equal((await app.call("POST", "/api/family/dad/restore", {}, mum)).status, 200);
+    assert.deepEqual(app.store().sent, seeded.sent, "and comes back on undo");
+
+    // Mum removes Dad (his stash still says his buddy is Bo), then Bo a minute later, then undoes Dad
+    assert.equal((await app.call("DELETE", "/api/family/dad", undefined, mum)).status, 200);
+    app.skew(60e3);
+    assert.equal((await app.call("DELETE", "/api/family/bo", undefined, mum)).status, 200);
+    assert.deepEqual(app.store().removals.map((r) => [r.person.id, r.person.buddy || "", r.by]), [["dad", "bo", "mum"], ["bo", "", "mum"]]);
+    app.skew(2 * 60e3);
+    const back = await app.call("POST", "/api/family/dad/restore", {}, mum);
+    assert.equal(back.status, 200, JSON.stringify(back.json));
+    assert.equal(back.json.settings.family.find((m) => m.id === "dad").buddy, "", "Dad is back without a buddy, because Bo is gone");
+    assert.deepEqual(back.json.settings.family.map((m) => m.id), ["kim", "mum", "dad"], "in his old place after Mum");
+    app.skew(17 * 60e3); // Bo is past the window
+    assert.equal((await app.call("PUT", "/api/ticks/" + today + "_kim_am", { on: true }, (await app.as("kim")))).status, 200);
+    assert.deepEqual(app.store().removals, [], "Bo was purged");
+    assert.ok(!/"bo"/.test(JSON.stringify(app.store())), "and nothing points at him any more");
+
+    // remove him again and restart past the window: the startup purge writes the file
+    assert.equal((await app.call("DELETE", "/api/family/dad", undefined, mum)).status, 200);
+    const rev = app.store().rev;
+    assert.ok(/"dad"/.test(JSON.stringify(app.store())));
+  } finally { app.stop(true); }
+  const again = await boot({ dir: first.dir, skew: 60 * 60e3 });
+  try {
+    const db = again.store();
+    assert.ok(!/"dad"/.test(JSON.stringify(db)), "purged on boot, on disk");
+    assert.ok(db.rev > 0 && JSON.stringify(db).indexOf('"removals":[]') > -1);
+    assert.deepEqual(Object.keys(db.sent.by), ["sms:mum"]);
+    assert.deepEqual((await again.call("GET", "/api/state", undefined, (await again.as("mum")))).json.settings.family.map((m) => m.id), ["kim", "mum"]);
+  } finally { again.stop(); }
 });

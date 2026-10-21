@@ -257,13 +257,18 @@ Settings a grown-up taps the cross on a saved person and confirms a
 message that counts what goes with them. The server then voids every
 session on their row, their skill votes, toilet trips, socialising ticks,
 vet entries and lessons, clears them as anyone's buddy and as a witness,
-and drops their phones' reminders. For 15 minutes Settings shows an Undo
-card that puts all of it back exactly. After that, the next save purges
-their id: the sessions on their row, their votes and their lessons are
-deleted; trips and vet entries stay, voided, with no author; a session
-they logged on someone else's row keeps the session and loses the author;
-a bite rating keeps the rating and loses the author. Nobody can remove
-themselves, a kid cannot remove anyone once a grown-up exists, and the
-last grown-up stays while kids are on the chart. The server log records
-ids and counts, never the name. Files the family already exported and the
+drops their phones' reminders and today's text tally for them. For 15
+minutes Settings shows an Undo card that puts all of it back exactly,
+including their place in the family order (colours and daily missions
+depend on it). A Settings page opened before the removal cannot quietly
+re-add them during that window: the save is refused with a message to
+reload. After the window, the next save (or the next start of the server)
+purges their id: the sessions on their row, their votes and their lessons
+are deleted; trips, socialising ticks and vet entries stay, voided, with
+no author; a session they logged on someone else's row keeps the session
+and loses the author, and still scores as logged by someone else; a bite
+rating keeps the rating and loses the author. Nobody can remove
+themselves, which is what keeps the last grown-up on the chart, and a kid
+cannot remove anyone once a grown-up exists. The server log records ids
+and counts, never the name. Files the family already exported and the
 daily backups are outside this; backups age out in 30 days.
