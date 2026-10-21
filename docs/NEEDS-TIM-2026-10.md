@@ -61,6 +61,8 @@ The four code branches each bump to pt-v18; identical bumps merge silently.
 | --- | --- | --- | --- |
 | 16 | Merge all of the above and promote, as on the 18th? Order: store-safety, client-ip, priv, nits, export-gaps, timeline, then the docs. | Yes; one bump after merging if anything else lands first. | merge or hold |
 
+Rehearsed 21 October on branch `rehearsal/2026-10-21`: the ten branches merged in that order, the two test-file conflicts resolved (both appended tests, both sides kept), stamps at pt-v18, 48 tests green. If nothing else has landed on main, `git merge --ff-only origin/rehearsal/2026-10-21` on main is the whole merge; then `update-puppy promote`.
+
 ## Already settled, for the record
 
 - Open source under AGPL-3.0, commercial licensing for branded trainer versions, sponsors get a logo and a thank-you and never the data (16 October).
