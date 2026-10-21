@@ -32,6 +32,8 @@ no longer mints new keys (`fix/store-safety`, waiting to merge).
 | 9 | Build "remove this person and their history" as designed in `docs/design/REMOVE-PERSON.md` (grown-up only, void not delete, 15-minute undo)? | Build before any other family is hosted; not urgent for yours. | build or later |
 | 10 | Send the My Fur Baby owner one line that the demo is on your server, visible to you, wiped on request? | Yes, next time you talk. | yes or no |
 
+Item 9 is built on `feat/remove-person` (21 October, four tests, on `rehearsal/2026-10-21-plus`): "build" is a merge, "later" leaves the branch where it is.
+
 ## Health card
 
 | # | Question | Recommendation | Say |

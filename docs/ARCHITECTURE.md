@@ -162,6 +162,8 @@ else is served from `public/` with a strict CSP.
 | `PUT /api/push/<id>` | owner or grown-up | Prefs (on, slots, times, quiet hours). `DELETE`: owner or grown-up, 404 if unknown. `POST .../test`: owner or grown-up, sends one real push; 410 and removal if the service says the subscription is gone. |
 | `POST /api/sms/test` | grown-up | `{ pid }`. One real text through the Aiva-SMS gateway, or 502 without one. |
 | `POST /api/share` | grown-up | Makes the visitor link (replaces any existing one). `DELETE`: revokes. |
+| `DELETE /api/family/<pid>` | grown-up once one exists | Removes the person and voids everything they logged with a removal stamp; clears buddy pointers and witness fields; drops their push rows. Never yourself, never the last grown-up while kids remain (`feat/remove-person`). |
+| `POST /api/family/<pid>/restore` | grown-up once one exists | Undo within 15 minutes: puts the person, pointers, rows and subscriptions back exactly. 404 after the window; the next save then purges the id from every row. |
 | `GET /api/photo` | PIN | The JPEG. `PUT` (data URL, JPEG magic bytes, 600 KB) and `DELETE`: grown-up once one exists. |
 
 ### The state response
@@ -180,6 +182,7 @@ else is served from `public/` with a strict CSP.
 | `sms` | boolean: gateway configured | |
 | `vapid` | the public key only | On `fix/store-safety`: empty while keys are missing. |
 | `share` | `{ token, created }` or null | |
+| `removals` | `[{ id, name, at, counts }]` still inside the 15-minute undo window | the stash itself (person record, buddy ids, push rows) stays server-side |
 | `photo` | boolean | |
 | `me`, `adultPin` | the caller's person id or null; whether a grown-up PIN is set | |
 
