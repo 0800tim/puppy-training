@@ -172,11 +172,12 @@ test("teaching: the teacher logs it, only the learner can confirm, both score on
   const app = await boot();
   try {
     const kid = await app.as("k"), mum = await app.as("a");
-    assert.equal((await app.call("POST", "/api/teach", { skill: "sit", learner: "k" }, kid)).status, 400, "not yourself");
+    assert.equal((await app.call("POST", "/api/teach", { skill: "name", learner: "k" }, kid)).status, 400, "not yourself");
+    // "name" has no prerequisite so it is open on day one; "sit" needs "yes" first
     assert.equal((await app.call("POST", "/api/teach", { skill: "nope", learner: "a" }, kid)).status, 400);
-    const t = await app.call("POST", "/api/teach", { skill: "sit", learner: "a" }, kid);
+    const t = await app.call("POST", "/api/teach", { skill: "name", learner: "a" }, kid);
     assert.equal(t.status, 200); assert.equal(t.json.teach[0].confirmed, null);
-    assert.equal((await app.call("POST", "/api/teach", { skill: "sit", learner: "a" }, kid)).status, 409, "no double logging");
+    assert.equal((await app.call("POST", "/api/teach", { skill: "name", learner: "a" }, kid)).status, 409, "no double logging");
     const id = t.json.teach[0].id;
     assert.equal((await app.call("PUT", "/api/teach/" + id, {}, kid)).status, 403, "the teacher can't confirm their own claim");
     const c = await app.call("PUT", "/api/teach/" + id, {}, mum);
@@ -243,5 +244,51 @@ test("privacy: successful logins and identity picks are logged without the addre
     const base = "http://127.0.0.1:" + app.server.address().port;
     await fetch(base + "/api/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pin: "000000" }) });
     assert.ok(seen.includes("login failed 127.0.0.1"), "failures keep the address for the lockout: " + seen.join(" | "));
+  } finally { app.stop(); }
+});
+
+test("review nits: health log follows the settings rule (open to kids only when the family has no grown-up)", async () => {
+  const app = await boot();
+  try {
+    const kid = await app.as("k");
+    assert.equal((await app.call("POST", "/api/healthlog", { kind: "weight", date: "2026-10-17", kg: 6.4 }, kid)).status, 403, "a kid in a family with a grown-up");
+    assert.equal((await app.call("POST", "/api/healthlog", { kind: "weight", date: "2026-10-17", kg: 6.4 }, app.session)).status, 403, "nobody picked");
+  } finally { app.stop(); }
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pt-"));
+  const server = createApp({ pin: PIN, dataDir: dir, log: () => {}, noScheduler: true, limits: { perIp: 50, global: 500 } });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  const base = "http://127.0.0.1:" + server.address().port;
+  const j = (o) => ({ "Content-Type": "application/json" });
+  try {
+    const login = await fetch(base + "/api/login", { method: "POST", headers: j(), body: JSON.stringify({ pin: PIN }) });
+    const session = login.headers.get("set-cookie").split(";")[0];
+    await fetch(base + "/api/settings", { method: "PUT", headers: Object.assign(j(), { Cookie: session }), body: JSON.stringify({ puppy: { name: "Pip", sex: "girl", born: "2026-08-14" }, start: "2026-10-16", family: [{ id: "k", name: "Kid", kind: "kid" }] }) });
+    const me = await fetch(base + "/api/me", { method: "POST", headers: Object.assign(j(), { Cookie: session }), body: JSON.stringify({ pid: "k" }) });
+    const cookie = session + "; " + me.headers.get("set-cookie").split(";")[0];
+    const r = await fetch(base + "/api/healthlog", { method: "POST", headers: Object.assign(j(), { Cookie: cookie }), body: JSON.stringify({ kind: "weight", date: "2026-10-17", kg: 6.4 }) });
+    assert.equal(r.status, 200, "all-kids family: the kid logs health, matching the client");
+    const d = await fetch(base + "/api/healthlog/" + (await r.json()).health[0].id, { method: "DELETE", headers: { Cookie: cookie } });
+    assert.equal(d.status, 200);
+  } finally { server.close(); fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("review nits: teaching needs an open skill, and open claims per teacher are capped", async () => {
+  const app = await boot();
+  try {
+    const kid = await app.as("k");
+    const locked = C.skills.find((s) => s.req && s.req.length);
+    assert.ok(locked, "content has a skill with prerequisites");
+    assert.equal((await app.call("POST", "/api/teach", { skill: locked.id, learner: "a" }, kid)).status, 400, "locked skill refused");
+    const open = C.skills.filter((s) => !s.req || !s.req.length).map((s) => s.id);
+    assert.ok(open.length >= 6, "enough open skills to test the cap: " + open.length);
+    for (let i = 0; i < 5; i++) assert.equal((await app.call("POST", "/api/teach", { skill: open[i], learner: "a" }, kid)).status, 200, "claim " + (i + 1));
+    const sixth = await app.call("POST", "/api/teach", { skill: open[5], learner: "a" }, kid);
+    assert.equal(sixth.status, 429, "sixth open claim refused");
+    assert.match(sixth.json.error, /waiting to be confirmed/);
+    // once one is confirmed there is room again
+    const mum = await app.as("a");
+    const first = (await app.call("GET", "/api/state", undefined, mum)).json.teach[0];
+    assert.equal((await app.call("PUT", "/api/teach/" + first.id, {}, mum)).status, 200);
+    assert.equal((await app.call("POST", "/api/teach", { skill: open[5], learner: "a" }, kid)).status, 200);
   } finally { app.stop(); }
 });
