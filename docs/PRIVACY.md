@@ -252,3 +252,21 @@ The last line is for Tim's hosted slots; a self-hoster replaces it.
    above on first run and in Settings once Tim approves the wording.
 6. For the demo slot: a line to the My Fur Baby owner that the demo is
    Tim's server, the data is visible to Tim, and it is wiped on request.
+
+## Removing a person (built 21 October 2026 on `feat/remove-person`)
+
+Follow-up 4 above, as designed in `docs/design/REMOVE-PERSON.md`. In
+Settings a grown-up taps the cross on a saved person and confirms a
+message that counts what goes with them. The server then voids every
+session on their row, their skill votes, toilet trips, socialising ticks,
+vet entries and lessons, clears them as anyone's buddy and as a witness,
+and drops their phones' reminders. For 15 minutes Settings shows an Undo
+card that puts all of it back exactly. After that, the next save purges
+their id: the sessions on their row, their votes and their lessons are
+deleted; trips and vet entries stay, voided, with no author; a session
+they logged on someone else's row keeps the session and loses the author;
+a bite rating keeps the rating and loses the author. Nobody can remove
+themselves, a kid cannot remove anyone once a grown-up exists, and the
+last grown-up stays while kids are on the chart. The server log records
+ids and counts, never the name. Files the family already exported and the
+daily backups are outside this; backups age out in 30 days.
