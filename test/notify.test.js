@@ -82,3 +82,38 @@ test("weekly challenge progress is computed and pays the family when won", () =>
   }
   assert.fail("diary challenge never came up in the rotation");
 });
+
+test("six unanswered nudges in a row put reminders to sleep: the phone is switched off, told once, then left alone", async () => {
+  const pushSub = { id: "abcdefabcdef", pid: "a", endpoint: "https://updates.push.services.mozilla.com/wpush/v2/x", keys: { p256dh: "x", auth: "y" }, prefs: {}, unanswered: 0 };
+  const db = { settings, ticks: {}, logs: {}, mastery: {}, toilet: [], push: [pushSub] };
+  const sent = [], logs = []; let persisted = 0;
+  let clock = at("2026-10-19", 7, 0); // Monday
+  const n = N.createNotifier({ db, C, R, keys: { publicKey: "p", privateKey: "k" }, subject: "mailto:test@example.com", log: (...a) => logs.push(a.join(" ")), persist: () => { persisted++; }, sendPush: async (s, payload) => { sent.push(payload); return { status: 201 }; }, sendSms: async () => true, now: () => clock });
+  try {
+    // five empty slots over three school days, nobody ticks anything
+    const minutes = [["2026-10-19", 7], ["2026-10-19", 15, 30], ["2026-10-20", 7], ["2026-10-20", 15, 30], ["2026-10-21", 7]];
+    for (const m of minutes) { clock = at(m[0], m[1], m[2]); await n.tick(); }
+    assert.deepEqual(sent.map((p) => p.tag), ["nudge-am", "nudge-pm", "nudge-am", "nudge-pm", "nudge-am"]);
+    assert.equal(pushSub.unanswered, 5);
+    assert.notEqual(pushSub.prefs.on, false, "still on after five");
+    // the sixth: the nudge goes out, then the goodbye, and the phone is switched off
+    clock = at("2026-10-21", 15, 30); await n.tick();
+    assert.equal(pushSub.unanswered, 6);
+    assert.equal(pushSub.prefs.on, false, "reminders off on this phone");
+    assert.deepEqual(sent.slice(5).map((p) => p.tag), ["nudge-pm", "exit"]);
+    const bye = sent[6];
+    assert.equal(bye.title, C.nudges.exitTitle);
+    assert.match(bye.body, /^Pip's reminders are having a rest/);
+    assert.equal(bye.url, "/#settings", "the goodbye opens Settings, where the switch is");
+    assert.ok(logs.some((l) => /push reminders paused after 6 unanswered a$/.test(l)), logs.join(" | "));
+    assert.ok(persisted >= 1, "the off switch is saved");
+    // from now on: silence, however many slots stay empty
+    for (const m of [["2026-10-22", 7], ["2026-10-22", 15, 30], ["2026-10-22", 18, 30], ["2026-10-22", 20]]) { clock = at(m[0], m[1], m[2]); await n.tick(); }
+    assert.equal(sent.length, 7, "nothing more, and no second goodbye");
+    // a grown-up turns the phone back on in Settings (the server resets unanswered with it): nudges resume
+    pushSub.prefs = { on: true }; pushSub.unanswered = 0;
+    clock = at("2026-10-23", 7, 0); await n.tick();
+    assert.equal(sent.length, 8); assert.equal(sent[7].tag, "nudge-am");
+    assert.equal(pushSub.unanswered, 1);
+  } finally { n.stop(); }
+});
