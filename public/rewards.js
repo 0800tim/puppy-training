@@ -121,7 +121,7 @@
           const t = me.slots[s]; if (!t) return;
           const h = t.at ? hourOf(t.at) : null;
           const inWin = h == null || (h >= W[s][0] && h < W[s][1]);
-          const own = !t.by || t.by === p.id;
+          const own = t.by == null || t.by === p.id; // "" is a purged author: still someone else's session
           points += own && inWin ? P.session : P.sessionOther;
           if (s === "am" && h != null && h < 7.5) early++;
           if (s === "ev" && h != null && h >= 19) owl++;
