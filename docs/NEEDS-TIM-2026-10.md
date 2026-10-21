@@ -5,7 +5,9 @@ answer you can give. Written 20 October 2026 from
 `docs/OFFSITE-BACKUP-PLAN.md`, `docs/PRIVACY.md`,
 `docs/HEALTH-TIMINGS-REVIEW.md`, `docs/MERGE-REVIEW-2026-10-17.md` and the
 Hivemind log. Everything from rounds 4 to 6 is on main and live. Round 7
-(20 October) added seven branches that wait on you; they are listed last.
+(20 October) added seven branches; they went live on 22 October with the
+guided course and are listed last for the record. The 22 October update
+adds items 17 to 20 at the end.
 
 Answer with the number and the word, for example "1 A, 2 yes, 5 go".
 
@@ -27,27 +29,25 @@ no longer mints new keys (`fix/store-safety`, waiting to merge).
 | # | Question | Recommendation | Say |
 | --- | --- | --- | --- |
 | 6 | Approve the 120-word in-app note in `docs/PRIVACY.md` for the first-run screen and Settings, and a Privacy line in the README? | Yes as written, or send back one edit. | yes or edit |
-| 7 | Kids' phones no longer receive phone numbers (`priv/followups`). Merge it? | Yes. | yes or no |
-| 8 | Success log lines no longer carry the address; failures keep it (same branch). Log rotation is still open: add a weekly rotate timer, or leave the logs as they are? | Rotate; the logs are small but grow forever. | rotate or leave |
-| 9 | Build "remove this person and their history" as designed in `docs/design/REMOVE-PERSON.md` (grown-up only, void not delete, 15-minute undo)? | Build before any other family is hosted; not urgent for yours. | build or later |
-| 10 | Send the My Fur Baby owner one line that the demo is on your server, visible to you, wiped on request? | Yes, next time you talk. | yes or no |
-
-Item 9 is built on `feat/remove-person` (21 October, four tests, on `rehearsal/2026-10-21-plus`): "build" is a merge, "later" leaves the branch where it is.
+| 7 | Settled 22 October: kids' phones no longer receive phone numbers, live. | | |
+| 8 | Success log lines no longer carry the address (live 22 October). Log rotation is still open: add a weekly rotate timer, or leave the logs as they are? | Rotate; the logs are small but grow forever. | rotate or leave |
+| 9 | Settled 22 October: "remove this person and their history" is built and live (grown-up only, void not delete, 15-minute undo). | | |
+| 10 | Send the My Fur Baby owner one line that the demo is on your server, visible to you, wiped on request? | Yes, next time you talk. See also item 19: they could have their own household instead. | yes or no |
 
 ## Health card
 
 | # | Question | Recommendation | Say |
 | --- | --- | --- | --- |
-| 11 | Vaccine wording on the health card and the timeline is softened (health card live; timeline on `content/timeline-vaccines`). Happy with it? | Yes. | yes or edit |
+| 11 | Vaccine wording on the health card and the timeline is softened (both live since 22 October). Happy with it? | Yes. | yes or edit |
 | 12 | Add a "course complete" tick so families at clinics that finish at 12 weeks stop seeing the 16-week line, and count the booster from the last logged dose? | Build; it is small and the nag is wrong for those families. | build or leave |
 | 13 | Flea reminder: leave flea treatments as a log entry, or add "next flea due" 30 days after the last one with a product note? | Leave as a log; product intervals vary from monthly to three-monthly and a wrong nag is worse than none. | leave or add |
 | 14 | Where does the health card live: bottom of Skills (now), or its own spot on Pack or Settings? | Move to Pack under the puppy meter; it is about the puppy, not the training. | skills, pack or settings |
 | 15 | Leptospirosis for the puppy. | Not an app decision: ask the vet at the 12-week visit. Totally Vets now says urban dogs are at equal risk. | ask vet |
 
-## Branches from round 7 waiting to merge (20 October)
+## Branches from round 7 (20 October), all live since 22 October
 
-All cut from main 9bf5d5a, all tests green in their worktrees, none deployed.
-The four code branches each bump to pt-v18; identical bumps merge silently.
+Merged to main with the guided course rebuild on 22 October and promoted
+to stable and the demo (pt-v19, 56 tests). Kept here for the record.
 
 | Branch | What | Tests |
 | --- | --- | --- |
@@ -61,9 +61,23 @@ The four code branches each bump to pt-v18; identical bumps merge silently.
 
 | # | Question | Recommendation | Say |
 | --- | --- | --- | --- |
-| 16 | Merge all of the above and promote, as on the 18th? Order: store-safety, client-ip, priv, nits, export-gaps, timeline, then the docs. | Yes; one bump after merging if anything else lands first. | merge or hold |
+| 16 | Settled 22 October: merged in the rehearsed order and promoted with the course rebuild. | | |
 
-Rehearsed 21 October on branch `rehearsal/2026-10-21`: the ten branches merged in that order, the two test-file conflicts resolved (both appended tests, both sides kept), stamps at pt-v18, 48 tests green. If nothing else has landed on main, `git merge --ff-only origin/rehearsal/2026-10-21` on main is the whole merge; then `update-puppy promote`.
+## Added 22 October: hosting other families
+
+Tim asked on 22 October how another family registers and whether that
+means a proper login. The design is in `docs/design/HOUSEHOLDS.md`: an
+email magic link for the grown-up who starts a family, the family PIN
+unchanged as the kids' door, a join link or QR to put a phone in the right
+family, one folder per household on the server, and an owner page for Tim.
+Five branches, about three and a half days.
+
+| # | Question | Recommendation | Say |
+| --- | --- | --- | --- |
+| 17 | Start building households now, beginning with the store split and join links (steps 1 and 2, no email yet), or wait and ship all five steps together? | Start with 1 and 2: they are enough to hand the litter families a join link and a PIN. | start or wait |
+| 18 | Sender address for the magic-link emails, and authenticate `appspurt.com` in SendGrid first? | A `puppy@appspurt.com` sender and yes, authenticate first, or the links land in spam. | address, and yes or later |
+| 19 | Does the hosted service stay on `puppy.appspurt.com` or get its own domain before families sign up? Join links and emails carry the hostname. | Decide before step 3; staying on appspurt.com is fine for the litter families. | stay or domain |
+| 20 | Remove the `AIVA_SMS_*` lines from the demo slot's env, so a demo family cannot text from your SIM? One edit and a restart of the demo unit. | Yes, before the demo PIN goes to anyone else. | yes or no |
 
 ## Already settled, for the record
 
@@ -71,4 +85,6 @@ Rehearsed 21 October on branch `rehearsal/2026-10-21`: the ten branches merged i
 - Everyone trains everything, skills open by readiness, rewards for kids too (16 October decisions in the Hivemind).
 - Stable on puppy.appspurt.com, demo for the My Fur Baby owner, dev on puppy.appspurt.dev (16 October).
 - Help! tab renamed Tips with the other-pets section (18 October, live).
-- Phase 2 multi-family: only when Tim asks.
+- Phase 2 multi-family: Tim asked on 22 October; design in
+  `docs/design/HOUSEHOLDS.md`, items 17 to 19 above.
+- Guided course for everyone, no per-person tracks (22 October, live).
