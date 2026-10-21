@@ -121,6 +121,7 @@ Then put HTTPS in front of it (Caddy, nginx, a Cloudflare Tunnel or Tailscale Fu
 | `SESSION_DAYS` | `180` | How long a phone stays unlocked. |
 | `TRUST_PROXY` | off | Set `1` behind a reverse proxy or tunnel so rate limits and secure cookies use the real client. |
 | `PUPPY_ADULT_PIN` | unset | Optional second PIN, 4 to 8 digits. When set, picking a grown-up profile on a phone asks for it, so kids can't act as grown-ups. |
+| `HOUSEHOLDS` | off | Set `1` to host many families on one server (`docs/design/HOUSEHOLDS.md`). Each family gets its own folder under `DATA_DIR/households/`, its PINs are hashed in `DATA_DIR/households.json` and changed from the app, and `PUPPY_PIN` is only read once, to carry an existing single-family store over. Join links `/j/<family code>` tell a phone which family it belongs to. |
 | `PUSH_SUBJECT` | `mailto:hello@growthspurt.agency` | Contact for push services (VAPID subject). Keys are generated into `DATA_DIR/vapid.json`. |
 | `AIVA_SMS_API_URL`, `AIVA_SMS_API_KEY`, `AIVA_SMS_DEVICE_ID`, `AIVA_SMS_SIM_SUBSCRIPTION_ID` | unset | Optional SMS gateway for daily texts. Leave unset and texts are simply off. |
 | `SESSION_SECRET` | generated | Signs the cookies. Generated into `DATA_DIR/secret.key` if unset. |

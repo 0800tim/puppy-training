@@ -60,6 +60,7 @@ function decide(now, state, scores, subs, C, sentToday) {
 
 function createNotifier(o) {
   const { db, C, R, keys, subject, log, persist, sendPush, sendSms, now } = o;
+  const smsOn = o.sms !== false; // the hosted service texts only households that are allowed to use the gateway
   const clock = now || (() => new Date());
   let busy = false;
   async function tick() {
@@ -71,7 +72,7 @@ function createNotifier(o) {
       const scores = R.compute(db, C, { today: date });
       // no keys (vapid.json missing, see server.js): leave the subscriptions alone and send nothing to them
       const subs = keys ? (db.push || []).map((s) => Object.assign({ channel: "push" }, s)) : [];
-      (db.settings.family || []).forEach((p) => { if (p.phone && p.sms) subs.push({ id: "sms:" + p.id, pid: p.id, channel: "sms", prefs: { on: true }, phone: p.phone }); });
+      (db.settings.family || []).forEach((p) => { if (smsOn && p.phone && p.sms) subs.push({ id: "sms:" + p.id, pid: p.id, channel: "sms", prefs: { on: true }, phone: p.phone }); });
       const msgs = decide(t, db, scores, subs, C, db.sent.by);
       let changed = false;
       for (const m of msgs) {

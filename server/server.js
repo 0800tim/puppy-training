@@ -61,12 +61,17 @@ const UNDO_MS = 15 * 60e3;
 const localToday = () => { const d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); };
 
 function createApp(opts = {}) {
+  // HOUSEHOLDS=1 hosts many families on one server (docs/design/HOUSEHOLDS.md): one folder per household under
+  // DATA_DIR/households, PINs hashed in DATA_DIR/households.json, every cookie naming its household. Without it this
+  // is the single-family server it always was: one PIN from the environment, store.json in DATA_DIR, nothing else.
+  const multi = opts.households === true || String(opts.households ?? process.env.HOUSEHOLDS ?? "") === "1";
   const pin = String(opts.pin ?? process.env.PUPPY_PIN ?? "");
-  if (!/^\d{4,8}$/.test(pin)) throw new Error("Set PUPPY_PIN to 4 to 8 digits (6 or more recommended).");
+  if (!multi && !/^\d{4,8}$/.test(pin)) throw new Error("Set PUPPY_PIN to 4 to 8 digits (6 or more recommended).");
+  if (multi && pin && !/^\d{4,8}$/.test(pin)) throw new Error("PUPPY_PIN must be 4 to 8 digits, or unset with HOUSEHOLDS=1.");
   const dataDir = path.resolve(opts.dataDir ?? process.env.DATA_DIR ?? path.join(__dirname, "..", "data"));
   const sessionDays = Number(opts.sessionDays ?? process.env.SESSION_DAYS ?? 180);
   const trustProxy = opts.trustProxy === true || String(opts.trustProxy ?? process.env.TRUST_PROXY ?? "") === "1";
-  const limits = Object.assign({ perIp: 5, perIpWindowMs: 15 * 60e3, global: 20, globalWindowMs: 60 * 60e3 }, opts.limits || {});
+  const limits = Object.assign({ perIp: 5, perIpWindowMs: 15 * 60e3, global: 20, globalWindowMs: 60 * 60e3, perHousehold: 10 }, opts.limits || {});
   const now = opts.now || (() => Date.now());
   const log = opts.log || ((...a) => console.log(new Date().toISOString(), ...a));
   const pushSubject = opts.pushSubject || process.env.PUSH_SUBJECT || "mailto:hello@growthspurt.agency";
@@ -75,37 +80,30 @@ function createApp(opts = {}) {
 
   fs.mkdirSync(dataDir, { recursive: true });
 
-  /* ---------- secret + session tokens ---------- */
+  /* ---------- secret, signing, PIN hashing ---------- */
+  // One secret signs every cookie on the server. A cookie carries its household inside the signed payload, so one
+  // key serves every family and no family can forge another's cookie.
   let secret = opts.secret || process.env.SESSION_SECRET;
   if (!secret) {
     const kf = path.join(dataDir, "secret.key");
     if (fs.existsSync(kf)) secret = fs.readFileSync(kf, "utf8").trim();
     else { secret = crypto.randomBytes(32).toString("hex"); fs.writeFileSync(kf, secret, { mode: 0o600 }); }
   }
-  const pinTag = crypto.createHmac("sha256", secret).update("pin:" + pin).digest("hex").slice(0, 16); // changing the PIN logs everyone out
   const sign = (payload) => crypto.createHmac("sha256", secret).update(payload).digest("base64url");
-  const makeToken = () => { const p = Buffer.from(JSON.stringify({ exp: now() + sessionDays * 864e5, v: pinTag })).toString("base64url"); return p + "." + sign(p); };
-  function validToken(tok) {
-    if (!tok || typeof tok !== "string") return false;
-    const [p, s] = tok.split(".");
-    if (!p || !s) return false;
-    const expect = Buffer.from(sign(p)); const got = Buffer.from(s);
-    if (expect.length !== got.length || !crypto.timingSafeEqual(expect, got)) return false;
-    try { const j = JSON.parse(Buffer.from(p, "base64url").toString()); return j.v === pinTag && j.exp > now(); } catch { return false; }
-  }
-  const makeMe = (pid) => { const p = Buffer.from(JSON.stringify({ pid, v: pinTag })).toString("base64url"); return p + "." + sign(p); };
-  function validMe(tok) {
+  const sha = (x) => crypto.createHash("sha256").update(String(x)).digest();
+  const sameDigest = (a, b) => a.length === b.length && crypto.timingSafeEqual(a, b);
+  // The single-family PIN lives in the environment and is compared as before. PINs in the households index are scrypt
+  // hashes with their own salt, so the index file never holds a PIN.
+  const hashPin = (p) => { const salt = crypto.randomBytes(16); return "scrypt$" + salt.toString("hex") + "$" + crypto.scryptSync(String(p), salt, 32).toString("hex"); };
+  const pinOk = (hash, tryPin) => { const [kind, salt, h] = String(hash || "").split("$"); if (kind !== "scrypt" || !salt || !h) return false; return sameDigest(crypto.scryptSync(String(tryPin), Buffer.from(salt, "hex"), 32), Buffer.from(h, "hex")); };
+  const legacyTag = (p) => crypto.createHmac("sha256", secret).update("pin:" + p).digest("hex").slice(0, 16); // the pre-households tag: phones keep their cookies across the switch
+  const parsePayload = (tok) => {
     if (!tok || typeof tok !== "string") return null;
-    const [p, s] = tok.split("."); if (!p || !s) return null;
-    const expect = Buffer.from(sign(p)); const got = Buffer.from(s);
-    if (expect.length !== got.length || !crypto.timingSafeEqual(expect, got)) return null;
-    try { const j = JSON.parse(Buffer.from(p, "base64url").toString()); return j.v === pinTag && typeof j.pid === "string" ? j.pid : null; } catch { return null; }
-  }
-  const meCookie = (req, pid) => "pt_me=" + (pid ? makeMe(pid) : "") + "; Path=/; HttpOnly; SameSite=Strict; Max-Age=" + (pid ? Math.floor(sessionDays * 86400) : 0) + (isHttps(req) ? "; Secure" : "");
-  const pinHash = crypto.createHash("sha256").update(pin).digest();
-  const pinMatches = (tryPin) => crypto.timingSafeEqual(pinHash, crypto.createHash("sha256").update(String(tryPin)).digest());
-  const adultPinHash = adultPin ? crypto.createHash("sha256").update(adultPin).digest() : null;
-  const adultPinMatches = (tryPin) => !!adultPinHash && crypto.timingSafeEqual(adultPinHash, crypto.createHash("sha256").update(String(tryPin)).digest());
+    const [p, sig] = tok.split("."); if (!p || !sig) return null;
+    if (!sameDigest(Buffer.from(sign(p)), Buffer.from(sig))) return null;
+    try { return JSON.parse(Buffer.from(p, "base64url").toString()); } catch { return null; }
+  };
+  const peekHid = (tok) => { try { return JSON.parse(Buffer.from(String(tok || "").split(".")[0], "base64url").toString()).h || null; } catch { return null; } }; // unsigned peek; the signature is checked when the token is used
 
   /* ---------- brute-force protection ---------- */
   const fails = new Map(); // ip -> [timestamps]
@@ -119,13 +117,19 @@ function createApp(opts = {}) {
     if (globalFails.length >= limits.global) return Math.ceil((globalFails[0] + limits.globalWindowMs - t) / 1000);
     return 0;
   }
-  function recordFail(ip) { const t = now(); fails.set(ip, [...(fails.get(ip) || []), t]); globalFails.push(t); }
+  function recordFail(ip, hid) { const t = now(); fails.set(ip, [...(fails.get(ip) || []), t]); globalFails.push(t); if (hid) hFails.set(hid, [...(hFails.get(hid) || []), t]); }
+  // A stranger who has a family's code must not be able to grind that family's PIN from many addresses, and one
+  // family's typos must not lock every family on the server: a second counter, per household.
+  const hFails = new Map();
+  function lockedHousehold(hid) {
+    const t = now();
+    const mine = (hFails.get(hid) || []).filter((x) => t - x < limits.perIpWindowMs);
+    hFails.set(hid, mine);
+    return mine.length >= limits.perHousehold ? Math.ceil((mine[0] + limits.perIpWindowMs - t) / 1000) : 0;
+  }
 
-  /* ---------- store ---------- */
-  const storeFile = path.join(dataDir, "store.json");
-  let db = { rev: 1, settings: null, ticks: {}, logs: {}, mastery: {}, toilet: [], push: [], sent: null, social: {}, share: null, health: [], teach: [], removals: [] };
-  // An unreadable store is copied aside before anything else happens, so the next write cannot replace the family's
-  // chart with an empty one. Refusing to start would crash-loop under Restart=always, so we start fresh and shout.
+
+  /* ---------- files set aside ---------- */
   const stamp = () => new Date().toISOString().replace(/[:.]/g, "-");
   const setAside = (file, why) => {
     const aside = file + ".corrupt-" + stamp();
@@ -133,106 +137,220 @@ function createApp(opts = {}) {
     log(path.basename(file), "unreadable (" + why + "). Copied to", path.basename(aside) + ". Starting fresh; see docs/RESTORE.md.");
     return aside;
   };
-  if (fs.existsSync(storeFile)) {
-    try { fs.chmodSync(storeFile, 0o600); } catch {}
-    try { db = Object.assign(db, JSON.parse(fs.readFileSync(storeFile, "utf8"))); } catch (e) { setAside(storeFile, e.message); }
+
+  const smsSender = opts.sms === null ? null : (opts.sms || NOTIFY.makeSmsSender(process.env));
+  let vapid = null, pushReady = false; // decided once every household's store is loaded, below
+
+  /* ---------- households ----------
+   * One object per family: its store, its files, its PINs, its cookies and its reminder loop. The route handler
+   * picks one per request and works on it alone, so nothing a family does can reach another family's chart. */
+  const households = new Map();
+  const indexFile = path.join(dataDir, "households.json");
+  let index = { v: 1, households: [] }, indexMtime = 0, indexSaved = 0;
+  const hDir = (id) => path.join(dataDir, "households", id);
+  const CODE_CHARS = "23456789abcdefghjkmnpqrstuvwxyz"; // no 0, 1, i, l or o: the code gets read out across a kitchen
+  const slug = (x) => String(x || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 20) || "family";
+  const freshCode = (name) => { for (;;) { let c = slug(name) + "-"; for (let i = 0; i < 4; i++) c += CODE_CHARS[crypto.randomInt(CODE_CHARS.length)]; if (!index.households.some((r) => r.code === c)) return c; } };
+  const newRec = (o) => ({ id: o.id || "h_" + crypto.randomBytes(5).toString("hex"), code: o.code || freshCode(o.name), name: String(o.name || "").trim().slice(0, 24), owner: String(o.owner || "").trim().slice(0, 120),
+    pin: hashPin(o.pin), adultPin: o.adultPin ? hashPin(o.adultPin) : "", pinTag: o.pinTag || crypto.randomBytes(8).toString("hex"), created: now(), lastActive: now(), flags: { sms: !!o.sms, suspended: false, demo: !!o.demo } });
+  function saveIndex() {
+    const tmp = indexFile + "." + process.pid + ".tmp";
+    fs.writeFileSync(tmp, JSON.stringify(index, null, 1), { mode: 0o600 }); // owner emails and PIN hashes
+    fs.renameSync(tmp, indexFile);
+    try { indexMtime = fs.statSync(indexFile).mtimeMs; } catch {}
+    indexSaved = now();
   }
-  function persist(bump = true) {
-    if (purgeRemovals()) bump = true; // phones must see the purged rows
-    if (bump) db.rev++;
-    const tmp = storeFile + "." + process.pid + ".tmp";
-    fs.writeFileSync(tmp, JSON.stringify(db), { mode: 0o600 }); // the chart holds names and phone numbers
-    fs.renameSync(tmp, storeFile);
+  function readIndex() {
+    try { const j = JSON.parse(fs.readFileSync(indexFile, "utf8")); if (!j || !Array.isArray(j.households)) throw new Error("no households list in it"); return j; }
+    catch (e) { setAside(indexFile, e.message); return null; } // the folders are all still there; see docs/RESTORE.md
   }
-  const photoFile = path.join(dataDir, "photo.jpg");
-  const stateOut = () => ({ rev: db.rev, settings: db.settings, ticks: db.ticks, logs: db.logs, mastery: db.mastery, toilet: db.toilet.slice(-300), social: db.social || {}, health: (db.health || []).filter((h) => !h.void), photo: fs.existsSync(photoFile), today: localToday(),
-    teach: (db.teach || []).filter((t) => !t.void).slice(-200),
-    push: (db.push || []).map((s) => ({ id: s.id, pid: s.pid, prefs: s.prefs || {}, created: s.created, label: s.label || "" })), sms: !!smsSender, vapid: pushReady ? vapid.publicKey : "", share: db.share ? { token: db.share.token, created: db.share.created } : null,
-    removals: (db.removals || []).filter((r) => now() - r.at <= UNDO_MS).map((r) => ({ id: r.person.id, name: r.person.name, at: r.at, counts: r.counts })) });
-  /* ---------- push keys, notifier ---------- */
-  // The push key pair signs every reminder. Minting a new pair while phones are subscribed to the old one kills every
-  // subscription, so with subscriptions on file and no readable vapid.json we run with push paused instead: the
-  // subscriptions stay in the store and come back to life when vapid.json is restored (docs/RESTORE.md).
+  function refreshIndex() { // a household added to the file by another process shows up on the next miss
+    if (!multi) return;
+    let mt = 0; try { mt = fs.statSync(indexFile).mtimeMs; } catch { return; }
+    if (mt === indexMtime) return;
+    indexMtime = mt;
+    const j = readIndex(); if (!j) return;
+    index = j;
+    index.households.forEach((rec) => { if (!households.has(rec.id)) households.set(rec.id, openHousehold(rec).start()); });
+  }
+  const byCode = (code) => { let H = [...households.values()].find((x) => x.rec.code === code); if (!H) { refreshIndex(); H = [...households.values()].find((x) => x.rec.code === code); } return H || null; };
+  function resolveHousehold(ck) {
+    if (!multi) return households.get("default");
+    if (ck.pt_h && households.has(ck.pt_h)) return households.get(ck.pt_h);
+    const h = peekHid(ck.pt_session); if (h && households.has(h)) return households.get(h);
+    refreshIndex();
+    if (ck.pt_h && households.has(ck.pt_h)) return households.get(ck.pt_h);
+    return households.get("default") || null; // the family that was here before HOUSEHOLDS=1: its phones carry no pt_h yet
+  }
+  function createHousehold(o) {
+    if (!multi) throw new Error("households need HOUSEHOLDS=1");
+    if (!/^\d{4,8}$/.test(String(o.pin || ""))) throw new Error("PIN must be 4 to 8 digits");
+    if (o.adultPin && !/^\d{4,8}$/.test(String(o.adultPin))) throw new Error("grown-up PIN must be 4 to 8 digits");
+    const rec = newRec(o);
+    index.households.push(rec); saveIndex();
+    const H = openHousehold(rec).start(); households.set(rec.id, H);
+    log("household created", rec.id, rec.code);
+    return { id: rec.id, code: rec.code };
+  }
+
+  function openHousehold(rec) {
+    const env = !!rec.env; // the single-family server: PINs are plain strings from the environment
+    const dir = rec.dir || hDir(rec.id);
+    fs.mkdirSync(dir, { recursive: true });
+    const storeFile = path.join(dir, "store.json");
+    const photoFile = path.join(dir, "photo.jpg");
+    let db = { rev: 1, settings: null, ticks: {}, logs: {}, mastery: {}, toilet: [], push: [], sent: null, social: {}, share: null, health: [], teach: [], removals: [] };
+    // An unreadable store is copied aside before anything else happens, so the next write cannot replace the family's
+    // chart with an empty one. Refusing to start would crash-loop under Restart=always, so we start fresh and shout.
+    if (fs.existsSync(storeFile)) {
+      try { fs.chmodSync(storeFile, 0o600); } catch {}
+      try { db = Object.assign(db, JSON.parse(fs.readFileSync(storeFile, "utf8"))); } catch (e) { setAside(storeFile, e.message); }
+    }
+    function persist(bump = true) {
+      if (purgeRemovals()) bump = true; // phones must see the purged rows
+      if (bump) db.rev++;
+      const tmp = storeFile + "." + process.pid + ".tmp";
+      fs.writeFileSync(tmp, JSON.stringify(db), { mode: 0o600 }); // the chart holds names and phone numbers
+      fs.renameSync(tmp, storeFile);
+    }
+
+    const tag = () => rec.pinTag; // changing the PIN rotates it, which signs every phone in this household out
+    const hOk = (j) => !multi || j.h === rec.id || (j.h === undefined && rec.id === "default"); // cookies from before HOUSEHOLDS=1 name no household
+    const makeToken = () => { const p = Buffer.from(JSON.stringify(Object.assign({ exp: now() + sessionDays * 864e5, v: tag() }, multi ? { h: rec.id } : {}))).toString("base64url"); return p + "." + sign(p); };
+    const validToken = (tok) => { const j = parsePayload(tok); return !!j && j.v === tag() && j.exp > now() && hOk(j); };
+    const makeMe = (pid) => { const p = Buffer.from(JSON.stringify(Object.assign({ pid, v: tag() }, multi ? { h: rec.id } : {}))).toString("base64url"); return p + "." + sign(p); };
+    const validMe = (tok) => { const j = parsePayload(tok); return j && j.v === tag() && typeof j.pid === "string" && hOk(j) ? j.pid : null; };
+    const meCookie = (req, pid) => "pt_me=" + (pid ? makeMe(pid) : "") + "; Path=/; HttpOnly; SameSite=Strict; Max-Age=" + (pid ? Math.floor(sessionDays * 86400) : 0) + (isHttps(req) ? "; Secure" : "");
+    const pinMatches = (t) => (env ? sameDigest(sha(rec.pin), sha(t)) : pinOk(rec.pin, t));
+    const adultPinMatches = (t) => !!rec.adultPin && (env ? sameDigest(sha(rec.adultPin), sha(t)) : pinOk(rec.adultPin, t));
+    const H = { id: rec.id, rec, db, dir, storeFile, photoFile, persist, makeToken, validToken, validMe, meCookie, pinMatches, adultPinMatches, notifier: null,
+      get hasAdultPin() { return !!rec.adultPin; },
+      get sms() { return !!smsSender && (!multi || !!(rec.flags && rec.flags.sms)); },
+      get suspended() { return !!(rec.flags && rec.flags.suspended); } };
+    H.setPins = (np, na) => { // null leaves one alone; "" clears the grown-up PIN
+      if (np !== null) { rec.pin = hashPin(np); rec.pinTag = crypto.randomBytes(8).toString("hex"); }
+      if (na !== null) rec.adultPin = na ? hashPin(na) : "";
+      saveIndex();
+    };
+    H.touch = () => { if (multi) { rec.lastActive = now(); if (now() - indexSaved > 3600e3) saveIndex(); } };
+    H.start = () => {
+      if (!H.notifier && !opts.noScheduler) H.notifier = NOTIFY.createNotifier({ db, C: CONTENT, R: REWARDS, keys: vapid, subject: pushSubject, log, persist, sendPush: opts.sendPush || PUSH.sendPush,
+        sendSms: H.sms ? smsSender : (async () => { throw new Error("no SMS gateway configured"); }), sms: H.sms, now: opts.now ? () => new Date(now()) : undefined });
+      return H;
+    };
+    H.stop = () => { if (H.notifier) H.notifier.stop(); H.notifier = null; };
+    const stateOut = () => ({ rev: db.rev, settings: db.settings, ticks: db.ticks, logs: db.logs, mastery: db.mastery, toilet: db.toilet.slice(-300), social: db.social || {}, health: (db.health || []).filter((h) => !h.void), photo: fs.existsSync(photoFile), today: localToday(),
+      teach: (db.teach || []).filter((t) => !t.void).slice(-200),
+      push: (db.push || []).map((s) => ({ id: s.id, pid: s.pid, prefs: s.prefs || {}, created: s.created, label: s.label || "" })), sms: H.sms, vapid: pushReady ? vapid.publicKey : "", share: db.share ? { token: db.share.token, created: db.share.created } : null,
+      removals: (db.removals || []).filter((r) => now() - r.at <= UNDO_MS).map((r) => ({ id: r.person.id, name: r.person.name, at: r.at, counts: r.counts })) });
+    H.stateOut = stateOut;
+    const member = (id) => (db.settings && db.settings.family.find((m) => m.id === id)) || null;
+    H.member = member;
+
+    /* ---------- "remove this person and their history" (docs/design/REMOVE-PERSON.md) ----------
+     * Void everything they logged with a removal stamp, drop their phones' reminders, keep an undo for UNDO_MS,
+     * then purge their id from every row. Void rows stay (toilet patterns, the puppy's health record) but say nothing about who. */
+    const eachEntry = (fn) => {
+      for (const k in db.ticks) fn(db.ticks[k], k);
+      for (const d in db.logs) fn(db.logs[d]);
+      for (const sk in db.mastery) ((db.mastery[sk] && db.mastery[sk].done) || []).forEach((v) => fn(v));
+      (db.toilet || []).forEach((t) => fn(t));
+      for (const item in db.social || {}) (db.social[item] || []).forEach((x) => fn(x));
+      (db.health || []).forEach((h) => fn(h));
+      (db.teach || []).forEach((t) => fn(t));
+    };
+    function removePerson(who, by) {
+      const pid = who.id;
+      const r = { id: crypto.randomBytes(6).toString("hex"), at: now(), by, person: Object.assign({}, who), index: db.settings.family.findIndex((m) => m.id === pid), buddies: [], push: [], sent: null, counts: { sessions: 0, votes: 0, witnessed: 0, trips: 0, social: 0, health: 0, lessons: 0 } };
+      db.settings.family = db.settings.family.filter((m) => m.id !== pid);
+      db.settings.family.forEach((m) => { if (m.buddy === pid) { r.buddies.push(m.id); m.buddy = ""; } });
+      const stamp = (x, what) => { if (x && !x.void) { x.void = true; x.removed = r.id; r.counts[what]++; } };
+      eachEntry((x, key) => {
+        if (key) { if (key.split("_")[1] === pid) stamp(x, "sessions"); return; } // ticks they logged on someone else's row stay with that row
+        if ("bite" in x) return; // a bite rating is about the puppy; the id goes at purge time
+        if ("witness" in x) { if (x.by === pid) stamp(x, "votes"); else if (x.witness === pid && !x.void) { x.witness = ""; x.removedWitness = r.id; r.counts.witnessed++; } return; }
+        if ("teacher" in x) { if (x.teacher === pid || x.learner === pid) stamp(x, "lessons"); return; }
+        if (x.by === pid) stamp(x, "kind" in x && "date" in x ? "health" : "mood" in x ? "social" : "trips");
+      });
+      r.push = (db.push || []).filter((s) => s.pid === pid);
+      db.push = (db.push || []).filter((s) => s.pid !== pid);
+      if (db.sent && db.sent.by && db.sent.by["sms:" + pid]) { r.sent = db.sent.by["sms:" + pid]; delete db.sent.by["sms:" + pid]; } // today's text tally is keyed by person id
+      db.removals = (db.removals || []).concat(r);
+      return r;
+    }
+    function restorePerson(r) {
+      if (r.person.buddy && !db.settings.family.some((m) => m.id === r.person.buddy)) r.person.buddy = ""; // their buddy may have gone in the meantime
+      db.settings.family.splice(Math.min(r.index >= 0 ? r.index : db.settings.family.length, db.settings.family.length), 0, r.person); // back in their place: chart order, colours and missions depend on it
+      db.settings.family.forEach((m) => { if (r.buddies.includes(m.id) && !m.buddy) m.buddy = r.person.id; });
+      eachEntry((x) => {
+        if (x.removed === r.id) { delete x.void; delete x.removed; }
+        if (x.removedWitness === r.id) { x.witness = r.person.id; delete x.removedWitness; }
+      });
+      r.push.forEach((s) => { if (!(db.push || []).some((x) => x.id === s.id)) db.push.push(s); });
+      if (r.sent && db.sent && db.sent.by && !db.sent.by["sms:" + r.person.id]) db.sent.by["sms:" + r.person.id] = r.sent;
+      db.removals = db.removals.filter((x) => x.id !== r.id);
+    }
+    function purgeRemovals() {
+      const due = (db.removals || []).filter((r) => now() - r.at > UNDO_MS);
+      if (!due.length) return false;
+      due.forEach((r) => {
+        const pid = r.person.id;
+        for (const k in db.ticks) if (k.split("_")[1] === pid) delete db.ticks[k];
+        for (const sk in db.mastery) if (db.mastery[sk]) db.mastery[sk].done = (db.mastery[sk].done || []).filter((v) => v.by !== pid);
+        db.teach = (db.teach || []).filter((t) => t.teacher !== pid && t.learner !== pid);
+        eachEntry((x) => {
+          if (x.by === pid) x.by = "";
+          if (x.witness === pid) x.witness = "";
+          if (x.removed === r.id) delete x.removed;
+          if (x.removedWitness === r.id) delete x.removedWitness;
+        });
+        db.settings.family.forEach((m) => { if (m.buddy === pid) m.buddy = ""; });
+        db.removals.forEach((o) => { if (o.person.buddy === pid) o.person.buddy = ""; if (o.by === pid) o.by = ""; }); // a stash still open may point at them
+        if (db.sent && db.sent.by) delete db.sent.by["sms:" + pid];
+      });
+      db.removals = db.removals.filter((r) => !due.includes(r));
+      return true;
+    }
+    if (purgeRemovals()) persist(); // a stash left from before a restart
+    H.removePerson = removePerson; H.restorePerson = restorePerson;
+    return H;
+  }
+
+  if (multi) {
+    const legacyStore = path.join(dataDir, "store.json");
+    if (fs.existsSync(indexFile)) { const j = readIndex(); if (j) index = j; try { indexMtime = fs.statSync(indexFile).mtimeMs; } catch {} }
+    else if (fs.existsSync(legacyStore)) {
+      // First boot with HOUSEHOLDS=1 on a single-family server: the family becomes household "default", its PINs move
+      // from the environment into the index, and its phones keep their cookies (same secret, same tag, no household named).
+      if (!pin) throw new Error("HOUSEHOLDS=1 found an existing store.json: set PUPPY_PIN once more so the family can be carried over.");
+      const dir = hDir("default"); fs.mkdirSync(dir, { recursive: true });
+      fs.renameSync(legacyStore, path.join(dir, "store.json"));
+      const legacyPhoto = path.join(dataDir, "photo.jpg"); if (fs.existsSync(legacyPhoto)) fs.renameSync(legacyPhoto, path.join(dir, "photo.jpg"));
+      let name = ""; try { name = JSON.parse(fs.readFileSync(path.join(dir, "store.json"), "utf8")).settings.puppy.name || ""; } catch {}
+      index.households.push(newRec({ id: "default", name, pin, adultPin, pinTag: legacyTag(pin), sms: !!smsSender }));
+      saveIndex();
+      log("carried the family over to households/default with code", index.households[0].code);
+    } else saveIndex();
+    index.households.forEach((rec) => households.set(rec.id, openHousehold(rec)));
+  } else households.set("default", openHousehold({ id: "default", dir: dataDir, env: true, pin, adultPin, pinTag: legacyTag(pin), code: "default", flags: { sms: true } }));
+
+  /* ---------- push keys, reminder loops ---------- */
+  // The push key pair signs every reminder and belongs to the server, not to a family. Minting a new pair while phones
+  // are subscribed to the old one kills every subscription, so with subscriptions on file and no readable vapid.json
+  // we run with push paused instead: the subscriptions stay in the stores and come back to life when vapid.json is
+  // restored (docs/RESTORE.md).
   const vapidFile = path.join(dataDir, "vapid.json");
-  let vapid = null;
   if (fs.existsSync(vapidFile)) {
     try { vapid = JSON.parse(fs.readFileSync(vapidFile, "utf8")); if (!vapid || !vapid.publicKey || !vapid.privateKey) throw new Error("no key pair in it"); }
     catch (e) { vapid = null; setAside(vapidFile, e.message); }
   }
   if (!vapid) {
-    if ((db.push || []).length) log("vapid.json missing with", db.push.length, "phone(s) subscribed: push is PAUSED until data/vapid.json is restored from backup (docs/RESTORE.md). No new keys were made.");
+    const subscribed = [...households.values()].reduce((n, H) => n + (H.db.push || []).length, 0);
+    if (subscribed) log("vapid.json missing with", subscribed, "phone(s) subscribed: push is PAUSED until data/vapid.json is restored from backup (docs/RESTORE.md). No new keys were made.");
     else { vapid = PUSH.generateVapidKeys(); fs.writeFileSync(vapidFile, JSON.stringify(vapid), { mode: 0o600 }); }
   }
-  const pushReady = !!vapid;
-  const smsSender = opts.sms === null ? null : (opts.sms || NOTIFY.makeSmsSender(process.env));
-  const notifier = opts.noScheduler ? null : NOTIFY.createNotifier({ db, C: CONTENT, R: REWARDS, keys: vapid, subject: pushSubject, log, persist, sendPush: opts.sendPush || PUSH.sendPush, sendSms: smsSender || (async () => { throw new Error("no SMS gateway configured"); }), now: opts.now ? () => new Date(now()) : undefined });
-  const member = (id) => (db.settings && db.settings.family.find((m) => m.id === id)) || null;
-
-  /* ---------- "remove this person and their history" (docs/design/REMOVE-PERSON.md) ----------
-   * Void everything they logged with a removal stamp, drop their phones' reminders, keep an undo for UNDO_MS,
-   * then purge their id from every row. Void rows stay (toilet patterns, the puppy's health record) but say nothing about who. */
-  const eachEntry = (fn) => {
-    for (const k in db.ticks) fn(db.ticks[k], k);
-    for (const d in db.logs) fn(db.logs[d]);
-    for (const sk in db.mastery) ((db.mastery[sk] && db.mastery[sk].done) || []).forEach((v) => fn(v));
-    (db.toilet || []).forEach((t) => fn(t));
-    for (const item in db.social || {}) (db.social[item] || []).forEach((x) => fn(x));
-    (db.health || []).forEach((h) => fn(h));
-    (db.teach || []).forEach((t) => fn(t));
-  };
-  function removePerson(who, by) {
-    const pid = who.id;
-    const r = { id: crypto.randomBytes(6).toString("hex"), at: now(), by, person: Object.assign({}, who), index: db.settings.family.findIndex((m) => m.id === pid), buddies: [], push: [], sent: null, counts: { sessions: 0, votes: 0, witnessed: 0, trips: 0, social: 0, health: 0, lessons: 0 } };
-    db.settings.family = db.settings.family.filter((m) => m.id !== pid);
-    db.settings.family.forEach((m) => { if (m.buddy === pid) { r.buddies.push(m.id); m.buddy = ""; } });
-    const stamp = (x, what) => { if (x && !x.void) { x.void = true; x.removed = r.id; r.counts[what]++; } };
-    eachEntry((x, key) => {
-      if (key) { if (key.split("_")[1] === pid) stamp(x, "sessions"); return; } // ticks they logged on someone else's row stay with that row
-      if ("bite" in x) return; // a bite rating is about the puppy; the id goes at purge time
-      if ("witness" in x) { if (x.by === pid) stamp(x, "votes"); else if (x.witness === pid && !x.void) { x.witness = ""; x.removedWitness = r.id; r.counts.witnessed++; } return; }
-      if ("teacher" in x) { if (x.teacher === pid || x.learner === pid) stamp(x, "lessons"); return; }
-      if (x.by === pid) stamp(x, "kind" in x && "date" in x ? "health" : "mood" in x ? "social" : "trips");
-    });
-    r.push = (db.push || []).filter((s) => s.pid === pid);
-    db.push = (db.push || []).filter((s) => s.pid !== pid);
-    if (db.sent && db.sent.by && db.sent.by["sms:" + pid]) { r.sent = db.sent.by["sms:" + pid]; delete db.sent.by["sms:" + pid]; } // today's text tally is keyed by person id
-    db.removals = (db.removals || []).concat(r);
-    return r;
-  }
-  function restorePerson(r) {
-    if (r.person.buddy && !db.settings.family.some((m) => m.id === r.person.buddy)) r.person.buddy = ""; // their buddy may have gone in the meantime
-    db.settings.family.splice(Math.min(r.index >= 0 ? r.index : db.settings.family.length, db.settings.family.length), 0, r.person); // back in their place: chart order, colours and missions depend on it
-    db.settings.family.forEach((m) => { if (r.buddies.includes(m.id) && !m.buddy) m.buddy = r.person.id; });
-    eachEntry((x) => {
-      if (x.removed === r.id) { delete x.void; delete x.removed; }
-      if (x.removedWitness === r.id) { x.witness = r.person.id; delete x.removedWitness; }
-    });
-    r.push.forEach((s) => { if (!(db.push || []).some((x) => x.id === s.id)) db.push.push(s); });
-    if (r.sent && db.sent && db.sent.by && !db.sent.by["sms:" + r.person.id]) db.sent.by["sms:" + r.person.id] = r.sent;
-    db.removals = db.removals.filter((x) => x.id !== r.id);
-  }
-  function purgeRemovals() {
-    const due = (db.removals || []).filter((r) => now() - r.at > UNDO_MS);
-    if (!due.length) return false;
-    due.forEach((r) => {
-      const pid = r.person.id;
-      for (const k in db.ticks) if (k.split("_")[1] === pid) delete db.ticks[k];
-      for (const sk in db.mastery) if (db.mastery[sk]) db.mastery[sk].done = (db.mastery[sk].done || []).filter((v) => v.by !== pid);
-      db.teach = (db.teach || []).filter((t) => t.teacher !== pid && t.learner !== pid);
-      eachEntry((x) => {
-        if (x.by === pid) x.by = "";
-        if (x.witness === pid) x.witness = "";
-        if (x.removed === r.id) delete x.removed;
-        if (x.removedWitness === r.id) delete x.removedWitness;
-      });
-      db.settings.family.forEach((m) => { if (m.buddy === pid) m.buddy = ""; });
-      db.removals.forEach((o) => { if (o.person.buddy === pid) o.person.buddy = ""; if (o.by === pid) o.by = ""; }); // a stash still open may point at them
-      if (db.sent && db.sent.by) delete db.sent.by["sms:" + pid];
-    });
-    db.removals = db.removals.filter((r) => !due.includes(r));
-    return true;
-  }
-  if (purgeRemovals()) persist(); // a stash left from before a restart
+  pushReady = !!vapid;
+  households.forEach((H) => H.start());
 
   function cleanSettings(x) {
     if (!x || typeof x !== "object") return null;
@@ -291,6 +409,7 @@ function createApp(opts = {}) {
     }
     return req.socket.remoteAddress || "?";
   };
+  const hCookie = (req, hid) => "pt_h=" + hid + "; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000" + (isHttps(req) ? "; Secure" : ""); // a pointer, not a credential: Lax so a join link can set it
   const isHttps = (req) => (trustProxy ? String(req.headers["x-forwarded-proto"] || "").startsWith("https") : !!req.socket.encrypted);
   function cookies(req) { const o = {}; String(req.headers.cookie || "").split(";").forEach((c) => { const i = c.indexOf("="); if (i > 0) o[c.slice(0, i).trim()] = decodeURIComponent(c.slice(i + 1).trim()); }); return o; }
   function send(res, code, body, headers = {}) {
@@ -328,29 +447,46 @@ function createApp(opts = {}) {
     let m;
     if (!p.startsWith("/api/")) {
       if (req.method !== "GET" && req.method !== "HEAD") return send(res, 405, "Method not allowed");
+      if (multi && (m = p.match(/^\/j\/([a-z0-9-]{3,40})$/))) { // the join link: this phone belongs to that family; the PIN screen follows
+        const H = byCode(m[1]);
+        if (!H) return send(res, 404, "No family with that code. Ask them for a new link.");
+        return send(res, 302, "", { Location: "/", "Set-Cookie": hCookie(req, H.id) });
+      }
       return serveStatic(req, res, p);
     }
     if (p === "/api/health") return send(res, 200, { app: "puppy-training", version: VERSION, pin: true });
     if ((m = p.match(/^\/api\/visitor\/([a-f0-9]{24})$/)) && req.method === "GET") {
-      const tok = Buffer.from(m[1]), real = Buffer.from(db.share ? db.share.token : "x".repeat(24));
-      if (!db.settings || tok.length !== real.length || !crypto.timingSafeEqual(tok, real)) return send(res, 404, visitorHtml(null), VISITOR_HEADERS);
-      return send(res, 200, visitorHtml(db.settings), VISITOR_HEADERS);
+      const tok = Buffer.from(m[1]);
+      const hit = [...households.values()].find((H) => H.db.settings && H.db.share && sameDigest(tok, Buffer.from(H.db.share.token)));
+      return hit ? send(res, 200, visitorHtml(hit.db.settings), VISITOR_HEADERS) : send(res, 404, visitorHtml(null), VISITOR_HEADERS);
     }
+
+    if (p === "/api/logout" && req.method === "POST") { // needs no family: a lost phone must always be able to lock itself
+      res.setHeader("Set-Cookie", ["pt_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0", "pt_me=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0"]);
+      return send(res, 200, { ok: true });
+    }
+
+    // Which family is this phone? One household on the single-family server; otherwise the household cookie, or the
+    // one a session cookie names, or the carried-over family for phones from before HOUSEHOLDS=1.
+    const ck = cookies(req);
+    const H = resolveHousehold(ck);
+    if (!H) return send(res, 401, { error: "Which family? Open your family's join link first.", code: "household" });
+    if (H.suspended) return send(res, 403, { error: "This family's school is paused. Ask whoever runs the server." });
+    const { db, persist, photoFile, stateOut, member, removePerson, restorePerson, adultPinMatches, hasAdultPin, makeToken, validToken, validMe, meCookie } = H;
 
     if (p === "/api/login" && req.method === "POST") {
-      const ip = clientIp(req);
-      const wait = lockedFor(ip);
-      if (wait > 0) { log("login locked", ip); return send(res, 429, { error: "Too many tries", retryAfter: wait }, { "Retry-After": String(wait) }); }
+      const ip = clientIp(req), hid = multi ? [H.id] : []; // the single-family log lines stay exactly as they were
+      const wait = Math.max(lockedFor(ip), lockedHousehold(H.id));
+      if (wait > 0) { log("login locked", ip, ...hid); return send(res, 429, { error: "Too many tries", retryAfter: wait }, { "Retry-After": String(wait) }); }
       const body = await readJson(req);
-      if (!pinMatches(body.pin ?? "")) { recordFail(ip); log("login failed", ip); return send(res, 401, { error: "Wrong PIN" }); }
-      fails.delete(ip);
-      log("login ok");
+      if (!H.pinMatches(body.pin ?? "")) { recordFail(ip, H.id); log("login failed", ip, ...hid); return send(res, 401, { error: "Wrong PIN" }); }
+      fails.delete(ip); hFails.delete(H.id);
+      H.touch();
+      log("login ok", ...hid);
       const cookie = "pt_session=" + makeToken() + "; Path=/; HttpOnly; SameSite=Strict; Max-Age=" + Math.floor(sessionDays * 86400) + (isHttps(req) ? "; Secure" : "");
-      return send(res, 200, { ok: true }, { "Set-Cookie": cookie });
+      return send(res, 200, { ok: true }, { "Set-Cookie": multi ? [cookie, hCookie(req, H.id)] : cookie });
     }
-    if (p === "/api/logout" && req.method === "POST") { res.setHeader("Set-Cookie", ["pt_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0", "pt_me=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0"]); return send(res, 200, { ok: true }); }
 
-    const ck = cookies(req);
     if (!validToken(ck.pt_session)) return send(res, 401, { error: "PIN needed" });
     // Who is this phone? Set once with POST /api/me, signed by the server, never taken from a request body.
     const me = member(validMe(ck.pt_me));
@@ -359,7 +495,7 @@ function createApp(opts = {}) {
     // Phone numbers go only to grown-ups' phones once the family has a grown-up (kids see the family read-only anyway).
     // In an all-kids family the kids are the editors, so they keep the full record or a save would wipe the numbers.
     const forKids = (st) => (st && hasAdult && !isAdult ? Object.assign({}, st, { family: st.family.map((m) => { const c = Object.assign({}, m); delete c.phone; return c; }) }) : st);
-    const out = (extra) => Object.assign(stateOut(), { settings: forKids(db.settings), me: me ? me.id : null, adultPin: !!adultPinHash }, extra || {});
+    const out = (extra) => Object.assign(stateOut(), { settings: forKids(db.settings), me: me ? me.id : null, adultPin: hasAdultPin }, extra || {});
     const needMe = () => send(res, 403, { error: "Pick yourself first", code: "pick" });
 
     if (p === "/api/state" && req.method === "GET") {
@@ -371,7 +507,7 @@ function createApp(opts = {}) {
       const body = await readJson(req);
       const who = member(body.pid);
       if (!who) return send(res, 400, { error: "Who?" });
-      if (who.kind === "adult" && adultPinHash) {
+      if (who.kind === "adult" && hasAdultPin) {
         const ip = clientIp(req);
         const wait = lockedFor(ip);
         if (wait > 0) return send(res, 429, { error: "Too many tries", retryAfter: wait }, { "Retry-After": String(wait) });
@@ -379,7 +515,7 @@ function createApp(opts = {}) {
         fails.delete(ip);
       }
       log("me", who.id);
-      return send(res, 200, Object.assign(stateOut(), { me: who.id, adultPin: !!adultPinHash }), { "Set-Cookie": meCookie(req, who.id) });
+      return send(res, 200, Object.assign(stateOut(), { me: who.id, adultPin: hasAdultPin }), { "Set-Cookie": meCookie(req, who.id) });
     }
     if (p === "/api/me" && req.method === "DELETE") return send(res, 200, out({ me: null }), { "Set-Cookie": meCookie(req, null) });
     if (p === "/api/settings" && req.method === "PUT") {
@@ -497,7 +633,7 @@ function createApp(opts = {}) {
       const to = member(body.pid);
       if (!isAdult) return send(res, 403, { error: "Grown-ups only" });
       if (!to || !to.phone) return send(res, 400, { error: "No phone number saved for that person" });
-      if (!smsSender) return send(res, 503, { error: "No SMS gateway configured on this server" });
+      if (!H.sms) return send(res, 503, { error: "No SMS gateway configured on this server" });
       const pup = (db.settings && db.settings.puppy.name) || "Your puppy";
       try { await smsSender(to.phone, pup + " here. Texts are on for " + to.name + ". I'll text once a day at most, only if nothing is on the chart. puppy.appspurt.com"); return send(res, 200, { ok: true }); }
       catch (e) { return send(res, 502, { error: "SMS failed: " + e.message }); }
@@ -575,6 +711,21 @@ function createApp(opts = {}) {
       log("restored", m[1], "by", me.id);
       persist(); return send(res, 200, out());
     }
+    // A household changes its own PINs. A new family PIN rotates the tag, so every phone in the family, this one too, is signed out.
+    if (p === "/api/pins" && req.method === "PUT") {
+      if (!multi) return send(res, 409, { error: "This server's PINs are set in its environment (PUPPY_PIN, PUPPY_ADULT_PIN)" });
+      if (!me) return needMe();
+      if (hasAdult && !isAdult) return send(res, 403, { error: "Ask a grown-up to change the PINs" });
+      const body = await readJson(req);
+      const np = body.pin === undefined ? null : String(body.pin), na = body.adultPin === undefined ? null : String(body.adultPin);
+      if (np === null && na === null) return send(res, 400, { error: "Nothing to change" });
+      if (np !== null && !/^\d{4,8}$/.test(np)) return send(res, 400, { error: "Family PIN: 4 to 8 digits" });
+      if (na !== null && na !== "" && !/^\d{4,8}$/.test(na)) return send(res, 400, { error: "Grown-up PIN: 4 to 8 digits, or empty to turn it off" });
+      H.setPins(np, na);
+      log("pins changed", H.id, "by", me.id, np !== null ? "family" : "", na !== null ? "grown-up" : "");
+      if (np === null) return send(res, 200, { ok: true, signedOut: false });
+      return send(res, 200, { ok: true, signedOut: true }, { "Set-Cookie": ["pt_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0", "pt_me=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0"] });
+    }
     if (p === "/api/share" && req.method === "POST") {
       if (!isAdult) return send(res, 403, { error: "Grown-ups only" });
       db.share = { token: crypto.randomBytes(12).toString("hex"), created: now() };
@@ -621,8 +772,10 @@ function createApp(opts = {}) {
       if (!res.headersSent) send(res, code, { error: code === 500 ? "Server error" : e.message });
     });
   });
-  server.notifier = notifier;
-  server.on("close", () => { if (notifier) notifier.stop(); });
+  server.households = { multi, create: createHousehold, get: (id) => households.get(id) || null, byCode, reload: refreshIndex,
+    list: () => index.households.map((r) => ({ id: r.id, code: r.code, name: r.name, owner: r.owner, created: r.created, lastActive: r.lastActive, flags: r.flags, people: ((households.get(r.id) || {}).db || {}).settings ? households.get(r.id).db.settings.family.length : 0 })) };
+  server.notifier = households.has("default") ? households.get("default").notifier : null;
+  server.on("close", () => households.forEach((H) => H.stop()));
   return server;
 }
 

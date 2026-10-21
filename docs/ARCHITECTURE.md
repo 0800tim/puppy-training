@@ -329,3 +329,30 @@ What is not there: accounts, sign-up, per-family secrets, a family id in
 cookies or file names, per-family rate limits, a scheduler that iterates
 families, a "forget this person" action (`docs/design/REMOVE-PERSON.md`).
 Those are design work, not refactoring.
+
+Revised 22 October: "forget this person" shipped (`DELETE /api/family/<pid>`,
+void with a 15-minute undo). The split itself is designed in
+`docs/design/HOUSEHOLDS.md` and step 1 of it is on branch
+`feat/households-store`:
+
+- `createApp` builds one **household** object per family (`openHousehold`):
+  its `db`, `persist`, files, PIN matchers, cookie makers, `stateOut`,
+  `member`, the remove-person helpers and its own notifier. The route
+  handler resolves one household per request from the `pt_h` cookie, the
+  household named inside the session cookie, or the carried-over family,
+  then destructures that household's functions, so the route bodies are
+  unchanged and cannot reach another family's chart.
+- Without `HOUSEHOLDS=1` there is exactly one household, `default`, with
+  its files where they always were, PINs from the environment, and cookies
+  byte-identical to before (no household field, same tag), which is why the
+  existing suite passes unchanged.
+- With `HOUSEHOLDS=1`: `DATA_DIR/households.json` is the index (id, code,
+  name, owner email, scrypt PIN hashes, tag, flags), each family lives in
+  `DATA_DIR/households/<id>/`, one `secret.key` and one `vapid.json` serve
+  the server. First boot with a legacy `store.json` moves it into household
+  `default`, hashes the env PINs into the index and keeps the old cookies
+  valid. `GET /j/<code>` sets `pt_h`; `PUT /api/pins` lets a grown-up change
+  either PIN (a new family PIN rotates the tag and signs the family out);
+  a per-household PIN lockout sits beside the per-IP one; SMS is a
+  per-household flag, on only for the carried-over family. Sign-up, email,
+  the welcome screens and the owner page are steps 2 to 4 of the design.

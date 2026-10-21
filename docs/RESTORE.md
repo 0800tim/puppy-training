@@ -19,6 +19,20 @@ Not in the backup, by design: `.env` (the PIN and gateway settings; it lives onl
 
 **Backups are not offsite.** They sit on the same disk as the live data. An offsite copy (the house pattern is the `clawdia-backups` R2 bucket, age-encrypted, as the other projects do) is still to be set up. Until then a disk failure loses the backups too.
 
+### With `HOUSEHOLDS=1` (branch `feat/households-store`)
+
+A hosted slot keeps one folder per family under `data/households/<id>/`
+(`store.json` and `photo.jpg`, exactly as a single family's) and the index
+`data/households.json` (codes, owner emails, PIN hashes, flags). The backup
+script copies the index as `households-<slot>-<date>.json` and each
+family's chart as `store-<slot>-<id>-<date>.json`, photos as
+`photo-<slot>-<id>.jpg`. `secret.key` and `vapid.json` stay one per server
+and restore as below. To restore one family, stop the unit, put that
+family's `store.json` back in its folder, start the unit. To restore the
+index, put `households.json` back; the server sets an unreadable index
+aside as `households.json.corrupt-<time>` and starts with no families
+reachable until it is restored, the folders untouched.
+
 ## Restore a slot
 
 Replace `prod` with the slot you are restoring. The unit names are `puppy-training-prod.service`, `puppy-training-demo.service` and `puppy-training.service` (dev).
