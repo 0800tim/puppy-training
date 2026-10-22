@@ -146,7 +146,7 @@ class ServerStore {
     this.rev = j.rev;
     S.settings = j.settings || null;
     S.ticks = j.ticks || {}; S.logs = j.logs || {}; S.mastery = j.mastery || {}; S.toilet = j.toilet || [];
-    S.push = j.push || []; S.sms = !!j.sms; S.vapid = j.vapid || ""; S.social = j.social || {}; S.adultPin = !!j.adultPin; S.share = j.share || null; S.health = j.health || []; S.teach = j.teach || []; S.removals = j.removals || [];
+    S.push = j.push || []; S.sms = !!j.sms; S.vapid = j.vapid || ""; S.social = j.social || {}; S.adultPin = !!j.adultPin; S.share = j.share || null; S.health = j.health || []; S.teach = j.teach || []; S.removals = j.removals || []; S.household = j.household || null;
     if ("me" in j) { S.me = j.me; if (j.me && j.me !== meId) { meId = j.me; lsSet("pt.me", j.me); } }
     if (j.photo !== S.photo) { S.photo = !!j.photo; this.photoBust = Date.now(); }
     this.cb();
@@ -154,7 +154,7 @@ class ServerStore {
   async init(cb) {
     this.cb = cb;
     const r = await api("GET", "api/state");
-    if (r.status === 401) return "pin";
+    if (r.status === 401) return r.json && r.json.code === "household" ? "household" : "pin"; // no family on this phone yet, or no PIN
     if (!r.ok) throw new Error("server");
     if (r.json && r.json.settings && !r.json.me && meId && r.json.settings.family.some((p) => p.id === meId)) {
       const p = r.json.settings.family.find((x) => x.id === meId);
@@ -194,6 +194,7 @@ class ServerStore {
   setMastery(skill, by, witness, on) { return this.write("PUT", "api/mastery/" + skill, { by, witness, on }); }
   setSocial(item, by, mood, on) { return this.write("PUT", "api/social/" + item, { by, mood, on }); }
   makeShare() { return this.write("POST", "api/share", {}); }
+  setPins(x) { return api("PUT", "api/pins", x); } // no state comes back: a new family PIN signs this phone out
   addHealth(x) { return this.write("POST", "api/healthlog", x); }
   voidHealth(id) { return this.write("DELETE", "api/healthlog/" + id); }
   addTeach(skill, learner) { return this.write("POST", "api/teach", { skill, learner }); }
@@ -331,6 +332,89 @@ function renderPin() {
   draw();
   P.append(el("div", { class: "pin-wrap" }, box));
   show("pin");
+  // on a server that hosts many families: say which one this phone is in, and offer the way out of the wrong one
+  if (store.mode === "server") api("GET", "api/household").then((r) => {
+    if (!r.ok || !r.json || !r.json.households || !r.json.code) return;
+    box.prepend(el("div", { class: "pin-fam" }, [el("b", { text: r.json.name ? r.json.name + "'s puppy school" : "Your family's puppy school" }), el("small", { text: "Family code " + r.json.code })]));
+    box.append(el("button", { class: "linkbtn", type: "button", text: "Not your family? Use another code", onclick: () => renderJoin("") }));
+  });
+}
+
+/* ---------- welcome, join, start (servers that host many families) ---------- */
+function renderWelcome() {
+  const bad = new URLSearchParams(location.search).get("join");
+  if (bad) history.replaceState(null, "", location.pathname + location.hash);
+  if (bad === "unknown") return renderJoin("No family has that code. Check it and try again.");
+  const P = $("#p-pin"); P.replaceChildren();
+  P.append(el("div", { class: "pin-wrap" }, el("div", { class: "card welcome" }, [
+    el("div", { class: "eyebrow", text: "Puppy School HQ" }),
+    el("h2", { class: "h2", text: "Train your puppy together" }),
+    el("p", { class: "note", text: "Short lessons the whole family can follow, one tick at a time. Every family has its own school, its own PIN and its own chart." }),
+    el("div", { class: "row" }, [
+      el("button", { class: "btn", type: "button", text: "I have a family code", onclick: () => renderJoin("") }),
+      el("button", { class: "btn ghost", type: "button", text: "Start a new family", onclick: renderStart })])])));
+  show("pin");
+}
+function renderJoin(msg) {
+  const P = $("#p-pin"); P.replaceChildren();
+  const input = el("input", { type: "text", autocapitalize: "none", autocomplete: "off", spellcheck: "false", placeholder: "biscuit-4k7q", "aria-label": "Family code", maxlength: "40" });
+  const m = el("div", { class: "pin-msg", role: "alert", text: msg || "" });
+  const go = () => {
+    const code = input.value.trim().toLowerCase().replace(/\s+/g, "-");
+    if (!/^[a-z0-9-]{3,40}$/.test(code)) { m.textContent = "Codes look like biscuit-4k7q."; return; }
+    location.href = "/j/" + encodeURIComponent(code); // the server remembers the family on this phone and comes back to the PIN screen
+  };
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter") go(); });
+  P.append(el("div", { class: "pin-wrap" }, el("div", { class: "card welcome" }, [
+    el("div", { class: "eyebrow", text: "Join your family" }),
+    el("h2", { class: "h2", text: "Enter the family code" }),
+    el("p", { class: "note", text: "A grown-up finds it in Settings under Your family. A join link they send you does this step for you." }),
+    el("div", { class: "field" }, [el("label", { text: "Family code" }), input]), m,
+    el("div", { class: "row" }, [el("button", { class: "btn", type: "button", text: "Join", onclick: go }), el("button", { class: "btn ghost", type: "button", text: "Back", onclick: renderWelcome })])])));
+  show("pin"); input.focus();
+}
+function renderStart() {
+  const P = $("#p-pin"); P.replaceChildren();
+  P.append(el("div", { class: "pin-wrap" }, el("div", { class: "card welcome" }, [
+    el("div", { class: "eyebrow", text: "New family" }),
+    el("h2", { class: "h2", text: "Sign-up by email is on its way" }),
+    el("p", { class: "note", text: "Until then, whoever runs this server sets your family up and sends you a join link. Open it on each phone, enter the family PIN, pick your name, and you are in." }),
+    el("div", { class: "row" }, [el("button", { class: "btn ghost", type: "button", text: "Back", onclick: renderWelcome })])])));
+  show("pin");
+}
+
+/* ---------- Settings: your family (code, join link, PINs) ---------- */
+function renderFamilyCard() {
+  const h = S.household, url = location.origin + "/j/" + h.code;
+  const card = el("div", { class: "card", style: "display:grid;gap:10px" });
+  card.append(el("p", { class: "note", text: "Every phone in the family opens this link once, then enters the family PIN. Send it to the kids' phones and to anyone else who trains " + pupName() + "." }),
+    el("div", { class: "famcode" }, [el("small", { text: "Family code" }), el("b", { text: h.code })]),
+    el("input", { type: "text", readonly: true, value: url, "aria-label": "Join link", onclick: (e) => e.target.select() }),
+    el("div", { class: "row" }, [el("button", { class: "btn", type: "button", text: navigator.share ? "Share join link" : "Copy join link", onclick: async () => {
+      try { if (navigator.share) await navigator.share({ title: "Join " + pupName() + "'s puppy school", url }); else { await navigator.clipboard.writeText(url); toast("Copied"); } } catch (e) {}
+    } })]));
+  const digits = (v) => /^\d{4,8}$/.test(v);
+  const pinIn = el("input", { type: "password", inputmode: "numeric", pattern: "[0-9]*", autocomplete: "off", placeholder: "4 to 8 digits", "aria-label": "New family PIN", maxlength: "8" });
+  const adultIn = el("input", { type: "password", inputmode: "numeric", pattern: "[0-9]*", autocomplete: "off", placeholder: "4 to 8 digits", "aria-label": "New grown-up PIN", maxlength: "8" });
+  const changeFamily = async () => {
+    if (!digits(pinIn.value)) { toast("Family PIN: 4 to 8 digits"); return; }
+    if (!confirm("Change the family PIN? Every phone in the family, this one too, will need the new one.")) return;
+    const r = await store.setPins({ pin: pinIn.value });
+    if (!r.ok) { toast((r.json && r.json.error) || "Couldn't change it"); return; }
+    alert("Family PIN changed. Everyone signs in again with the new one."); location.reload();
+  };
+  const changeAdult = async (off) => {
+    if (!off && !digits(adultIn.value)) { toast("Grown-up PIN: 4 to 8 digits"); return; }
+    const r = await store.setPins({ adultPin: off ? "" : adultIn.value });
+    if (!r.ok) { toast((r.json && r.json.error) || "Couldn't change it"); return; }
+    S.adultPin = !off; toast(off ? "Grown-up PIN off" : "Grown-up PIN set"); renderSettings();
+  };
+  card.append(el("div", { class: "field" }, [el("label", { text: "Family PIN" }), el("div", { class: "row" }, [pinIn, el("button", { class: "btn ghost", type: "button", text: "Change", onclick: changeFamily })])]),
+    el("div", { class: "field" }, [el("label", { text: "Grown-up PIN" + (S.adultPin ? "" : " (off)") }), el("div", { class: "row" }, [adultIn,
+      el("button", { class: "btn ghost", type: "button", text: S.adultPin ? "Change" : "Turn on", onclick: () => changeAdult(false) }),
+      S.adultPin ? el("button", { class: "btn ghost", type: "button", text: "Turn off", onclick: () => { if (confirm("Turn the grown-up PIN off? Anyone with the family PIN could then act as a grown-up.")) changeAdult(true); } }) : null])]),
+    el("p", { class: "note", text: "The grown-up PIN is asked for when someone picks a grown-up's name on a phone, so kids can't act as grown-ups." }));
+  return card;
 }
 
 /* ---------- who's this phone ---------- */
@@ -512,9 +596,10 @@ function renderSettings(firstRun) {
         el("button", { class: "btn ghost", type: "button", text: "Export JSON", onclick: () => downloadFile("puppy-school-" + iso(today) + ".json", JSON.stringify(store.exportJson(), null, 2), "application/json") }),
         el("button", { class: "btn ghost", type: "button", text: "Export CSV", onclick: () => downloadFile("puppy-school-" + iso(today) + ".csv", exportCsv(), "text/csv") }),
         store.mode === "server" ? el("button", { class: "btn ghost", type: "button", text: "Lock this phone", onclick: () => store.logout() }) : null]),
-      el("p", { class: "note", text: store.mode === "server" ? "Ticks sync to everyone who has the family PIN. Changing the PIN on the server signs every phone out." : "Ticks are saved on this phone only. To share one chart with the whole family, self-host it with a family PIN (see the project README)." })]);
+      el("p", { class: "note", text: store.mode === "server" ? (S.household ? "Ticks sync to everyone who has the family PIN. Grown-ups change the PINs under Your family." : "Ticks sync to everyone who has the family PIN. Changing the PIN on the server signs every phone out.") : "Ticks are saved on this phone only. To share one chart with the whole family, self-host it with a family PIN (see the project README)." })]);
     P.append(el("div", { class: "eyebrow", text: "This phone" }), info);
     P.append(el("div", { class: "eyebrow", text: "Reminders" }), renderNotifCard());
+    if (isAdult(me()) && S.household) P.append(el("div", { class: "eyebrow", text: "Your family" }), renderFamilyCard());
     if (isAdult(me())) P.append(el("div", { class: "eyebrow", text: "Visitor card" }), renderShareCard());
   }
 }
@@ -1416,7 +1501,7 @@ function onState() {
 async function boot2() {
   try {
     const r = await store.init(onState);
-    if (r === "pin") renderPin();
+    if (r === "pin") renderPin(); else if (r === "household") renderWelcome();
   } catch (e) {
     console.error(e);
     const net = !e || e.message === "server" || /fetch/i.test(String(e.message));

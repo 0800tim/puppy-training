@@ -354,5 +354,17 @@ void with a 15-minute undo). The split itself is designed in
   valid. `GET /j/<code>` sets `pt_h`; `PUT /api/pins` lets a grown-up change
   either PIN (a new family PIN rotates the tag and signs the family out);
   a per-household PIN lockout sits beside the per-IP one; SMS is a
-  per-household flag, on only for the carried-over family. Sign-up, email,
-  the welcome screens and the owner page are steps 2 to 4 of the design.
+  per-household flag, on only for the carried-over family.
+- Step 2 is on `feat/households-join` (stacked on step 1): `/api/health`
+  says `households: true`, `GET /api/household` tells a phone which family
+  it is in before the PIN (code and puppy's name, or nothing), the state
+  carries `household: { code, name }`, an unknown join code bounces to
+  `/?join=unknown` and counts toward the per-IP lockout. The client gets a
+  welcome screen (`renderWelcome`, shown on the 401 with `code: "household"`),
+  a family-code screen (`renderJoin`, which navigates to `/j/<code>`), a
+  holding screen for "Start a new family" until sign-up exists, the family
+  name and code on the PIN screen with a way out of the wrong family, and a
+  "Your family" card in Settings for grown-ups (code, join link with Share or
+  Copy, change the family PIN, turn the grown-up PIN on, off or change it).
+  No QR code yet: the join link is shared the way the visitor card is. Sign-up
+  by email and the owner page are steps 3 and 4 of the design.

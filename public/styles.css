@@ -521,3 +521,15 @@ button.vid{width:100%;border:1px solid var(--line);font:inherit;text-align:left;
 .card.start{border:2px solid var(--accent);display:grid;gap:10px}
 .card.start .eyebrow{margin:0}
 .card.start .steps.big{margin-top:2px}
+
+/* ---------- households: welcome, join, your family ---------- */
+.card.welcome{display:grid;gap:10px;width:min(100%,420px)}
+.card.welcome .row{margin-top:4px}
+.pin-fam{display:grid;justify-items:center;gap:2px;text-align:center}
+.pin-fam b{font-family:var(--font-display);font-size:1.1rem}
+.pin-fam small{color:var(--muted)}
+.linkbtn{background:none;border:0;color:var(--accent);font:inherit;font-weight:700;cursor:pointer;text-decoration:underline;padding:6px;min-height:44px}
+.famcode{display:grid;gap:2px}
+.famcode small{color:var(--muted);font-size:.8rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase}
+.famcode b{font-family:var(--font-display);font-size:1.7rem;letter-spacing:.02em;user-select:all}
+.field .row input{flex:1;min-width:120px}

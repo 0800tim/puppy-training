@@ -450,13 +450,15 @@ function createApp(opts = {}) {
     if (!p.startsWith("/api/")) {
       if (req.method !== "GET" && req.method !== "HEAD") return send(res, 405, "Method not allowed");
       if (multi && (m = p.match(/^\/j\/([a-z0-9-]{3,40})$/))) { // the join link: this phone belongs to that family; the PIN screen follows
+        const ip = clientIp(req);
+        if (lockedFor(ip) > 0) return send(res, 429, "Too many tries. Wait a few minutes.");
         const H = byCode(m[1]);
-        if (!H) return send(res, 404, "No family with that code. Ask them for a new link.");
+        if (!H) { recordFail(ip); return send(res, 302, "", { Location: "/?join=unknown" }); } // guessing codes costs the same as guessing PINs
         return send(res, 302, "", { Location: "/", "Set-Cookie": hCookie(req, H.id) });
       }
       return serveStatic(req, res, p);
     }
-    if (p === "/api/health") return send(res, 200, { app: "puppy-training", version: VERSION, pin: true });
+    if (p === "/api/health") return send(res, 200, { app: "puppy-training", version: VERSION, pin: true, households: multi });
     if ((m = p.match(/^\/api\/visitor\/([a-f0-9]{24})$/)) && req.method === "GET") {
       const tok = Buffer.from(m[1]);
       const hit = [...households.values()].find((H) => H.db.settings && H.db.share && sameDigest(tok, Buffer.from(H.db.share.token)));
@@ -472,6 +474,7 @@ function createApp(opts = {}) {
     // one a session cookie names, or the carried-over family for phones from before HOUSEHOLDS=1.
     const ck = cookies(req);
     const H = resolveHousehold(ck);
+    if (p === "/api/household" && req.method === "GET") return send(res, 200, { households: multi, code: multi && H ? H.rec.code : null, name: multi && H ? H.rec.name : "" });
     if (!H) return send(res, 401, { error: "Which family? Open your family's join link first.", code: "household" });
     if (H.suspended) return send(res, 403, { error: "This family's school is paused. Ask whoever runs the server." });
     const { db, persist, photoFile, stateOut, member, removePerson, restorePerson, adultPinMatches, hasAdultPin, makeToken, validToken, validMe, meCookie } = H;
@@ -497,7 +500,7 @@ function createApp(opts = {}) {
     // Phone numbers go only to grown-ups' phones once the family has a grown-up (kids see the family read-only anyway).
     // In an all-kids family the kids are the editors, so they keep the full record or a save would wipe the numbers.
     const forKids = (st) => (st && hasAdult && !isAdult ? Object.assign({}, st, { family: st.family.map((m) => { const c = Object.assign({}, m); delete c.phone; return c; }) }) : st);
-    const out = (extra) => Object.assign(stateOut(), { settings: forKids(db.settings), me: me ? me.id : null, adultPin: hasAdultPin }, extra || {});
+    const out = (extra) => Object.assign(stateOut(), { settings: forKids(db.settings), me: me ? me.id : null, adultPin: hasAdultPin, household: multi ? { code: H.rec.code, name: H.rec.name } : null }, extra || {});
     const needMe = () => send(res, 403, { error: "Pick yourself first", code: "pick" });
 
     if (p === "/api/state" && req.method === "GET") {

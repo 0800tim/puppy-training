@@ -61,7 +61,7 @@ test("two households: own PINs, own stores, own folders, and neither can see or 
   const j = await app.call("GET", "/j/" + A.code);
   assert.equal(j.status, 302); assert.equal(j.location, "/"); assert.equal(j.jar.pt_h, A.id);
   assert.ok(j.cookies[0].includes("SameSite=Lax"), "a join link arrives from elsewhere, so the pointer cookie is Lax");
-  assert.equal((await app.call("GET", "/j/biscuit-zzzz")).status, 404);
+  assert.equal((await app.call("GET", "/j/biscuit-zzzz")).location, "/?join=unknown", "a wrong code goes back to the app with a message");
 
   // A's PIN opens A and not B
   const a = await login(app, "111111", A.id);
@@ -248,4 +248,25 @@ test("a PIN change made after the index was re-read from disk is saved, not lost
   assert.equal((await login(three, "111111", A.id)).status, 401);
   assert.equal((await login(three, "333333", A.id)).status, 200);
   assert.equal((await login(three, "222222", B.id)).status, 200, "B survived the save too");
+});
+
+test("before the PIN a phone can ask which family it is in; health says the server hosts households; an unknown join code bounces back to the app and counts as a failed try", async () => {
+  const app = await boot({ households: true, dataDir: tmp(), limits: { perIp: 2, global: 500 } });
+  const A = app.server.households.create({ name: "Biscuit", pin: "111111" });
+  assert.equal((await app.call("GET", "/api/health")).json.households, true);
+  assert.deepEqual((await app.call("GET", "/api/household")).json, { households: true, code: null, name: "" });
+  assert.deepEqual((await app.call("GET", "/api/household", undefined, "pt_h=" + A.id)).json, { households: true, code: A.code, name: "Biscuit" });
+  const a = await login(app, "111111", A.id);
+  const st = await app.call("GET", "/api/state", undefined, "pt_h=" + A.id + "; pt_session=" + a.jar.pt_session);
+  assert.deepEqual(st.json.household, { code: A.code, name: "Biscuit" });
+  let r = await app.call("GET", "/j/biscuit-zzzz");
+  assert.equal(r.status, 302); assert.equal(r.location, "/?join=unknown");
+  r = await app.call("GET", "/j/biscuit-yyyy");
+  assert.equal((await app.call("GET", "/j/" + A.code)).status, 429, "two bad guesses lock the address for join links too");
+
+  const single = await boot({ pin: "482913", dataDir: tmp() });
+  assert.equal((await single.call("GET", "/api/health")).json.households, false);
+  assert.deepEqual((await single.call("GET", "/api/household")).json, { households: false, code: null, name: "" });
+  const s = await single.call("POST", "/api/login", { pin: "482913" });
+  assert.equal((await single.call("GET", "/api/state", undefined, "pt_session=" + s.jar.pt_session)).json.household, null);
 });
