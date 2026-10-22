@@ -366,5 +366,25 @@ void with a 15-minute undo). The split itself is designed in
   name and code on the PIN screen with a way out of the wrong family, and a
   "Your family" card in Settings for grown-ups (code, join link with Share or
   Copy, change the family PIN, turn the grown-up PIN on, off or change it).
-  No QR code yet: the join link is shared the way the visitor card is. Sign-up
-  by email and the owner page are steps 3 and 4 of the design.
+  No QR code yet: the join link is shared the way the visitor card is.
+- Step 3 is on `feat/households-email`: `server/mail.js` (`MAIL=console`
+  prints each email to the log with its link; `MAIL=sendgrid` posts to
+  SendGrid's v3 mail/send with click tracking off, because a rewritten link
+  is a broken sign-in link). `POST /api/signup { email, puppy, name, pin }`
+  stores a pending record in `households.json` (PIN hashed) and emails a
+  signed link; nothing is made until `POST /m/<token>` opens it, which
+  creates the household, keeps the form's answers as `db.starter` to prefill
+  the first Settings, and sets `pt_h` and `pt_session`. `POST /api/email
+  { email }` finds every household where that address is on a grown-up's row
+  (or is the owner of a family not yet set up) and emails one link per
+  family; opening one sets `pt_me` too, since the email proved who they are,
+  so no grown-up PIN is asked. `GET /m/<token>` only shows a page that posts
+  itself (`public/m.js`), so a mail scanner fetching the link cannot spend it.
+  Links are signed with the server secret, carry a nonce and a 15-minute
+  expiry, and are single use: sign-ups by removing the pending record,
+  sign-ins by a `spent` list in the index, both pruned on every index save
+  and shared with any other process that reads the file. The reply to both
+  routes is the same whether or not the address is known, and link requests
+  are capped at three an hour per visitor address and per email address.
+  Grown-ups' rows gain an optional `email` (kids' rows never carry one, and
+  kids' phones do not receive them). The owner page is step 4.

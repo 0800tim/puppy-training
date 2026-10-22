@@ -254,8 +254,8 @@ test("before the PIN a phone can ask which family it is in; health says the serv
   const app = await boot({ households: true, dataDir: tmp(), limits: { perIp: 2, global: 500 } });
   const A = app.server.households.create({ name: "Biscuit", pin: "111111" });
   assert.equal((await app.call("GET", "/api/health")).json.households, true);
-  assert.deepEqual((await app.call("GET", "/api/household")).json, { households: true, code: null, name: "" });
-  assert.deepEqual((await app.call("GET", "/api/household", undefined, "pt_h=" + A.id)).json, { households: true, code: A.code, name: "Biscuit" });
+  assert.deepEqual((await app.call("GET", "/api/household")).json, { households: true, signup: true, code: null, name: "" });
+  assert.deepEqual((await app.call("GET", "/api/household", undefined, "pt_h=" + A.id)).json, { households: true, signup: true, code: A.code, name: "Biscuit" });
   const a = await login(app, "111111", A.id);
   const st = await app.call("GET", "/api/state", undefined, "pt_h=" + A.id + "; pt_session=" + a.jar.pt_session);
   assert.deepEqual(st.json.household, { code: A.code, name: "Biscuit" });
@@ -266,7 +266,7 @@ test("before the PIN a phone can ask which family it is in; health says the serv
 
   const single = await boot({ pin: "482913", dataDir: tmp() });
   assert.equal((await single.call("GET", "/api/health")).json.households, false);
-  assert.deepEqual((await single.call("GET", "/api/household")).json, { households: false, code: null, name: "" });
+  assert.deepEqual((await single.call("GET", "/api/household")).json, { households: false, signup: false, code: null, name: "" });
   const s = await single.call("POST", "/api/login", { pin: "482913" });
   assert.equal((await single.call("GET", "/api/state", undefined, "pt_session=" + s.jar.pt_session)).json.household, null);
 });

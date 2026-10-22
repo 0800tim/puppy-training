@@ -1,6 +1,6 @@
 /* Service worker: caches the app shell so it opens instantly and works offline.
    The family chart (api/*) always goes to the network. Bump VERSION when shipping changes. */
-const VERSION = "pt-v21";
+const VERSION = "pt-v22";
 const V = VERSION.replace("pt-v", "");
 const SHELL = ["./", "index.html", "styles.css?v=" + V, "content.js?v=" + V, "rewards.js?v=" + V, "theme.js?v=" + V, "app.js?v=" + V, "manifest.webmanifest", "icon.svg", "icon-192.png", "icon-512.png", "apple-touch-icon.png"];
 
@@ -12,7 +12,7 @@ self.addEventListener("activate", (e) => {
 });
 self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
-  if (e.request.method !== "GET" || url.origin !== location.origin || url.pathname.includes("/api/")) return;
+  if (e.request.method !== "GET" || url.origin !== location.origin || url.pathname.includes("/api/") || /^\/(m|j)\//.test(url.pathname)) return; // links from emails and join links are the server's, never cached
   // Network first so updates show up straight away; fall back to the cache offline.
   e.respondWith(
     fetch(e.request).then((res) => {

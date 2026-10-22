@@ -34,10 +34,20 @@ rest on the box.
 | Visitor link token | `share` | A link that shows the puppy's name | A grown-up |
 | The puppy's photo | `photo.jpg` | Usually a dog. Nothing stops a family uploading a child holding the dog | A grown-up |
 
-Not stored: surnames, email addresses, street addresses, birthdays of people,
-passwords (the PIN is a hash in memory, from `.env`), locations from the
-phone, or anything from the phone's contacts, camera roll or sensors beyond
-the one photo chosen.
+Not stored: surnames, street addresses, birthdays of people, passwords (the
+PIN is a hash in memory, from `.env`), locations from the phone, or anything
+from the phone's contacts, camera roll or sensors beyond the one photo chosen.
+
+Added 22 October 2026, with `HOUSEHOLDS=1` only (`docs/design/HOUSEHOLDS.md`):
+a grown-up's email address, on their row in `settings.family` and, for the
+grown-up who started the family, in `DATA_DIR/households.json` as the owner.
+It is used for one thing: sending that person a sign-in link when they ask
+for one. Kids never have one (the server drops any email on a kid's row) and
+kids' phones never receive the grown-ups' addresses. A sign-up waiting for its
+link to be opened sits in the same index file for fifteen minutes (email,
+first name, puppy's name, a hash of the chosen PIN) and is then forgotten.
+The log records "signup link" and "sign-in link" with the address and the
+visitor's IP address, as it does for failed PINs.
 
 The identity on every entry (`by`) is the design: accountability instead of
 approval queues. It also means the chart is a fairly complete picture of each

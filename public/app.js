@@ -146,7 +146,7 @@ class ServerStore {
     this.rev = j.rev;
     S.settings = j.settings || null;
     S.ticks = j.ticks || {}; S.logs = j.logs || {}; S.mastery = j.mastery || {}; S.toilet = j.toilet || [];
-    S.push = j.push || []; S.sms = !!j.sms; S.vapid = j.vapid || ""; S.social = j.social || {}; S.adultPin = !!j.adultPin; S.share = j.share || null; S.health = j.health || []; S.teach = j.teach || []; S.removals = j.removals || []; S.household = j.household || null;
+    S.push = j.push || []; S.sms = !!j.sms; S.vapid = j.vapid || ""; S.social = j.social || {}; S.adultPin = !!j.adultPin; S.share = j.share || null; S.health = j.health || []; S.teach = j.teach || []; S.removals = j.removals || []; S.household = j.household || null; S.starter = j.starter || null;
     if ("me" in j) { S.me = j.me; if (j.me && j.me !== meId) { meId = j.me; lsSet("pt.me", j.me); } }
     if (j.photo !== S.photo) { S.photo = !!j.photo; this.photoBust = Date.now(); }
     this.cb();
@@ -195,6 +195,8 @@ class ServerStore {
   setSocial(item, by, mood, on) { return this.write("PUT", "api/social/" + item, { by, mood, on }); }
   makeShare() { return this.write("POST", "api/share", {}); }
   setPins(x) { return api("PUT", "api/pins", x); } // no state comes back: a new family PIN signs this phone out
+  signup(x) { return api("POST", "api/signup", x); }
+  emailLink(email) { return api("POST", "api/email", { email }); }
   addHealth(x) { return this.write("POST", "api/healthlog", x); }
   voidHealth(id) { return this.write("DELETE", "api/healthlog/" + id); }
   addTeach(skill, learner) { return this.write("POST", "api/teach", { skill, learner }); }
@@ -337,6 +339,7 @@ function renderPin() {
     if (!r.ok || !r.json || !r.json.households || !r.json.code) return;
     box.prepend(el("div", { class: "pin-fam" }, [el("b", { text: r.json.name ? r.json.name + "'s puppy school" : "Your family's puppy school" }), el("small", { text: "Family code " + r.json.code })]));
     box.append(el("button", { class: "linkbtn", type: "button", text: "Not your family? Use another code", onclick: () => renderJoin("") }));
+    if (r.json.signup) box.append(el("button", { class: "linkbtn", type: "button", text: "Grown-up on a new phone? Sign in by email", onclick: () => renderEmail("") }));
   });
 }
 
@@ -345,14 +348,18 @@ function renderWelcome() {
   const bad = new URLSearchParams(location.search).get("join");
   if (bad) history.replaceState(null, "", location.pathname + location.hash);
   if (bad === "unknown") return renderJoin("No family has that code. Check it and try again.");
+  const link = new URLSearchParams(location.search).get("link");
+  if (link) history.replaceState(null, "", location.pathname + location.hash);
   const P = $("#p-pin"); P.replaceChildren();
   P.append(el("div", { class: "pin-wrap" }, el("div", { class: "card welcome" }, [
     el("div", { class: "eyebrow", text: "Puppy School HQ" }),
     el("h2", { class: "h2", text: "Train your puppy together" }),
     el("p", { class: "note", text: "Short lessons the whole family can follow, one tick at a time. Every family has its own school, its own PIN and its own chart." }),
+    link ? el("div", { class: "pin-msg", role: "alert", text: link === "used" ? "That link has already been used. Ask for a new one." : "That link has stopped working. Links from emails work once, for 15 minutes. Ask for a new one." }) : null,
     el("div", { class: "row" }, [
       el("button", { class: "btn", type: "button", text: "I have a family code", onclick: () => renderJoin("") }),
-      el("button", { class: "btn ghost", type: "button", text: "Start a new family", onclick: renderStart })])])));
+      el("button", { class: "btn ghost", type: "button", text: "Start a new family", onclick: renderStart })]),
+    el("button", { class: "linkbtn", type: "button", text: "Grown-up on a new phone? Sign in by email", onclick: () => renderEmail("") })])));
   show("pin");
 }
 function renderJoin(msg) {
@@ -373,13 +380,73 @@ function renderJoin(msg) {
     el("div", { class: "row" }, [el("button", { class: "btn", type: "button", text: "Join", onclick: go }), el("button", { class: "btn ghost", type: "button", text: "Back", onclick: renderWelcome })])])));
   show("pin"); input.focus();
 }
-function renderStart() {
+async function renderStart() {
   const P = $("#p-pin"); P.replaceChildren();
+  const r = await api("GET", "api/household");
+  if (!r.ok || !r.json || !r.json.signup) {
+    P.append(el("div", { class: "pin-wrap" }, el("div", { class: "card welcome" }, [
+      el("div", { class: "eyebrow", text: "New family" }),
+      el("h2", { class: "h2", text: "Ask for a join link" }),
+      el("p", { class: "note", text: "Whoever runs this server sets your family up and sends you a join link. Open it on each phone, enter the family PIN, pick your name, and you are in." }),
+      el("div", { class: "row" }, [el("button", { class: "btn ghost", type: "button", text: "Back", onclick: renderWelcome })])])));
+    show("pin"); return;
+  }
+  const name = el("input", { type: "text", maxlength: "20", autocomplete: "given-name", placeholder: "Your first name", "aria-label": "Your name" });
+  const email = el("input", { type: "email", maxlength: "120", autocomplete: "email", autocapitalize: "none", placeholder: "you@example.nz", "aria-label": "Your email" });
+  const puppy = el("input", { type: "text", maxlength: "24", placeholder: "e.g. Pepper", "aria-label": "Puppy's name" });
+  const pin = el("input", { type: "password", inputmode: "numeric", pattern: "[0-9]*", autocomplete: "new-password", maxlength: "8", placeholder: "4 to 8 digits", "aria-label": "Family PIN" });
+  const msg = el("div", { class: "pin-msg", role: "alert" });
+  const btn = el("button", { class: "btn", type: "button", text: "Email me the link", onclick: async () => {
+    if (!name.value.trim() || !puppy.value.trim()) { msg.textContent = "Your name and the puppy's name, please."; return; }
+    if (!/^\S+@\S+\.\S+$/.test(email.value.trim())) { msg.textContent = "That does not look like an email address."; return; }
+    if (!/^\d{4,8}$/.test(pin.value)) { msg.textContent = "The family PIN is 4 to 8 digits."; return; }
+    btn.disabled = true; msg.textContent = "Sending…";
+    const r2 = await store.signup({ name: name.value.trim(), email: email.value.trim(), puppy: puppy.value.trim(), pin: pin.value });
+    btn.disabled = false;
+    if (!r2.ok) { msg.textContent = (r2.json && r2.json.error) || "Couldn't send it. Try again."; return; }
+    renderCheckEmail(email.value.trim());
+  } });
   P.append(el("div", { class: "pin-wrap" }, el("div", { class: "card welcome" }, [
     el("div", { class: "eyebrow", text: "New family" }),
-    el("h2", { class: "h2", text: "Sign-up by email is on its way" }),
-    el("p", { class: "note", text: "Until then, whoever runs this server sets your family up and sends you a join link. Open it on each phone, enter the family PIN, pick your name, and you are in." }),
-    el("div", { class: "row" }, [el("button", { class: "btn ghost", type: "button", text: "Back", onclick: renderWelcome })])])));
+    el("h2", { class: "h2", text: "Start your puppy school" }),
+    el("p", { class: "note", text: "You get a link by email to sign in as the grown-up. The kids get in with the family PIN you choose here; you can change it later." }),
+    el("div", { class: "field" }, [el("label", { text: "Your name" }), name]),
+    el("div", { class: "field" }, [el("label", { text: "Your email" }), email]),
+    el("div", { class: "field" }, [el("label", { text: "Puppy's name" }), puppy]),
+    el("div", { class: "field" }, [el("label", { text: "Family PIN for the kids" }), pin]),
+    msg,
+    el("div", { class: "row" }, [btn, el("button", { class: "btn ghost", type: "button", text: "Back", onclick: renderWelcome })])])));
+  show("pin"); name.focus();
+}
+function renderEmail(msgText) {
+  const P = $("#p-pin"); P.replaceChildren();
+  const email = el("input", { type: "email", maxlength: "120", autocomplete: "email", autocapitalize: "none", placeholder: "you@example.nz", "aria-label": "Your email" });
+  const msg = el("div", { class: "pin-msg", role: "alert", text: msgText || "" });
+  const go = async () => {
+    if (!/^\S+@\S+\.\S+$/.test(email.value.trim())) { msg.textContent = "That does not look like an email address."; return; }
+    btn.disabled = true; msg.textContent = "Sending…";
+    const r = await store.emailLink(email.value.trim());
+    btn.disabled = false;
+    if (!r.ok) { msg.textContent = (r.json && r.json.error) || "Couldn't send it. Try again."; return; }
+    renderCheckEmail(email.value.trim());
+  };
+  const btn = el("button", { class: "btn", type: "button", text: "Email me a link", onclick: go });
+  email.addEventListener("keydown", (e) => { if (e.key === "Enter") go(); });
+  P.append(el("div", { class: "pin-wrap" }, el("div", { class: "card welcome" }, [
+    el("div", { class: "eyebrow", text: "Grown-ups" }),
+    el("h2", { class: "h2", text: "Sign in by email" }),
+    el("p", { class: "note", text: "The email you gave when the family was set up, or the one on your row in Settings. Kids use the family PIN instead." }),
+    el("div", { class: "field" }, [el("label", { text: "Your email" }), email]), msg,
+    el("div", { class: "row" }, [btn, el("button", { class: "btn ghost", type: "button", text: "Back", onclick: renderWelcome })])])));
+  show("pin"); email.focus();
+}
+function renderCheckEmail(email) {
+  const P = $("#p-pin"); P.replaceChildren();
+  P.append(el("div", { class: "pin-wrap" }, el("div", { class: "card welcome" }, [
+    el("div", { class: "eyebrow", text: "Check your email" }),
+    el("h2", { class: "h2", text: "We sent a link to " + email }),
+    el("p", { class: "note", text: "Open it on this phone within 15 minutes. If nothing arrives, check the junk folder, then ask for another." }),
+    el("div", { class: "row" }, [el("button", { class: "btn ghost", type: "button", text: "Send again", onclick: () => renderEmail("") }), el("button", { class: "btn ghost", type: "button", text: "Use the family PIN instead", onclick: () => api("GET", "api/household").then((r) => (r.ok && r.json && r.json.code ? renderPin() : renderJoin(""))) })])])));
   show("pin");
 }
 
@@ -494,7 +561,8 @@ function cropPhoto(file) {
 }
 function renderSettings(firstRun) {
   const P = $("#p-settings"); P.replaceChildren();
-  const st = S.settings || { puppy: { name: "", sex: "girl", breed: "", born: "" }, start: iso(today), family: [{ id: "p1", name: "", kind: "kid", target: 21, age: "" }] };
+  const st = S.settings || (S.starter ? { puppy: { name: S.starter.puppy || "", sex: "girl", breed: "", born: "" }, start: iso(today), family: [{ id: "p1", name: S.starter.name || "", kind: "adult", target: C.kinds.adult.target, age: "", email: S.starter.email || "" }, { id: "p2", name: "", kind: "kid", target: 21, age: "" }] }
+    : { puppy: { name: "", sex: "girl", breed: "", born: "" }, start: iso(today), family: [{ id: "p1", name: "", kind: "kid", target: 21, age: "" }] });
   const locked = !firstRun && store.mode === "server" && family().some(isAdult) && !isAdult(me());
   const fam = JSON.parse(JSON.stringify(st.family)).map((p) => { const kind = C.kinds[p.kind] ? p.kind : "kid"; return Object.assign({ age: "" }, p, { kind, target: Number(p.target) > 0 ? Number(p.target) : C.kinds[kind].target }); });
   const kindSel = (p) => el("select", { "aria-label": "Kid or grown-up", onchange: (e) => { p.kind = e.target.value; if (!p.touched) p.target = C.kinds[p.kind].target; drawFam(); } },
@@ -512,7 +580,9 @@ function renderSettings(firstRun) {
         el("div", { class: "row" }, [el("label", { class: "target" }, ["Buddy ", el("select", { "aria-label": "Buddy for " + (p.name || "this person"), onchange: (e) => (p.buddy = e.target.value) }, [el("option", { value: "", text: "none" }), ...fam.filter((o) => o.id !== p.id && o.name).map((o) => el("option", { value: o.id, selected: p.buddy === o.id, text: o.name }))])])]),
         (isAdult(me()) || !family().some(isAdult)) && store.mode === "server" ? el("div", { class: "row" }, [
           el("input", { type: "tel", placeholder: "Mobile (for texts)", value: p.phone || "", "aria-label": "Mobile number", style: "flex:1;min-width:150px", oninput: (e) => (p.phone = e.target.value) }),
-          el("label", { class: "target" }, [el("input", { type: "checkbox", checked: !!p.sms, onchange: (e) => (p.sms = e.target.checked) }), " text " + (p.name || "them")])]) : null
+          el("label", { class: "target" }, [el("input", { type: "checkbox", checked: !!p.sms, onchange: (e) => (p.sms = e.target.checked) }), " text " + (p.name || "them")])]) : null,
+        p.kind === "adult" && (isAdult(me()) || !family().some(isAdult)) && store.mode === "server" && (S.household || S.starter) ? el("div", { class: "row" }, [
+          el("input", { type: "email", placeholder: "Email (to sign in on a new phone)", value: p.email || "", "aria-label": "Email for " + (p.name || "this grown-up"), style: "flex:1;min-width:200px", autocapitalize: "none", oninput: (e) => (p.email = e.target.value) })]) : null
       ]),
       fam.length > 1 ? el("button", { class: "iconbtn", type: "button", "aria-label": "Remove " + (p.name || "person"), text: "✕", onclick: () => { if (store.mode === "server" && family().some((o) => o.id === p.id)) removePerson(p); else { fam.splice(i, 1); drawFam(); } } }) : null
     ])));
@@ -534,7 +604,7 @@ function renderSettings(firstRun) {
     input.addEventListener("input", draw); draw(); return out;
   };
   const save = el("button", { class: "btn", type: "button", text: firstRun ? "Start training" : "Save", onclick: async () => {
-    const famClean = fam.map((p) => ({ id: p.id, name: p.name.trim().slice(0, 20), kind: p.kind, age: p.age || "", target: Math.max(1, Math.min(30, Number(p.target) || C.kinds[p.kind].target)), phone: p.phone || "", sms: !!p.sms, buddy: p.buddy || "" })).filter((p) => p.name);
+    const famClean = fam.map((p) => ({ id: p.id, name: p.name.trim().slice(0, 20), kind: p.kind, age: p.age || "", target: Math.max(1, Math.min(30, Number(p.target) || C.kinds[p.kind].target)), phone: p.phone || "", sms: !!p.sms, buddy: p.buddy || "", email: p.kind === "adult" ? (p.email || "").trim() : "" })).filter((p) => p.name);
     if (!famClean.length) { toast("Add at least one person"); return; }
     const next = { puppy: { name: name.value.trim().slice(0, 24), sex: sex.value, breed: breed.value.trim().slice(0, 80), born: born.value }, start: start.value || iso(today), family: famClean };
     await safe(async () => { await store.saveSettings(next); toast("Saved"); if (!me()) renderWho(); else show(firstRun ? "today" : current); });

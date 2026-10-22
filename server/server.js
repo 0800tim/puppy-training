@@ -25,6 +25,7 @@ const CONTENT = require("../public/content.js");
 const REWARDS = require("../public/rewards.js");
 const PUSH = require("./push.js");
 const NOTIFY = require("./notify.js");
+const MAIL = require("./mail.js");
 
 const VERSION = "2.0.0";
 const PUBLIC_DIR = path.resolve(__dirname, "..", "public");
@@ -71,12 +72,16 @@ function createApp(opts = {}) {
   const dataDir = path.resolve(opts.dataDir ?? process.env.DATA_DIR ?? path.join(__dirname, "..", "data"));
   const sessionDays = Number(opts.sessionDays ?? process.env.SESSION_DAYS ?? 180);
   const trustProxy = opts.trustProxy === true || String(opts.trustProxy ?? process.env.TRUST_PROXY ?? "") === "1";
-  const limits = Object.assign({ perIp: 5, perIpWindowMs: 15 * 60e3, global: 20, globalWindowMs: 60 * 60e3, perHousehold: 10 }, opts.limits || {});
+  const limits = Object.assign({ perIp: 5, perIpWindowMs: 15 * 60e3, global: 20, globalWindowMs: 60 * 60e3, perHousehold: 10, mail: 3, mailWindowMs: 60 * 60e3 }, opts.limits || {});
   const now = opts.now || (() => Date.now());
   const log = opts.log || ((...a) => console.log(new Date().toISOString(), ...a));
   const pushSubject = opts.pushSubject || process.env.PUSH_SUBJECT || "mailto:hello@growthspurt.agency";
   const adultPin = String(opts.adultPin ?? process.env.PUPPY_ADULT_PIN ?? "");
   if (adultPin && !/^\d{4,8}$/.test(adultPin)) throw new Error("PUPPY_ADULT_PIN must be 4 to 8 digits, or unset.");
+  // Sign-up and sign-in by email (docs/design/HOUSEHOLDS.md, step 3) exist only on a server that hosts many families.
+  const mailer = multi ? (opts.mailer || MAIL.makeMailer(process.env, { log })) : null;
+  const appUrl = String(opts.appUrl ?? process.env.APP_URL ?? "").replace(/\/+$/, ""); // where links in emails point; else the request's own host
+  const LINK_MS = 15 * 60e3;
 
   fs.mkdirSync(dataDir, { recursive: true });
 
@@ -127,6 +132,15 @@ function createApp(opts = {}) {
     hFails.set(hid, mine);
     return mine.length >= limits.perHousehold ? Math.ceil((mine[0] + limits.perIpWindowMs - t) / 1000) : 0;
   }
+  // Emails cost money and land in someone's inbox: a few an hour per address and per phone, counted whether or not
+  // one was actually sent, so the count itself says nothing about which addresses are on file.
+  const mailAsks = new Map();
+  function mailLimited(key) {
+    const t = now();
+    const mine = (mailAsks.get(key) || []).filter((x) => t - x < limits.mailWindowMs);
+    if (mine.length >= limits.mail) { mailAsks.set(key, mine); return true; }
+    mine.push(t); mailAsks.set(key, mine); return false;
+  }
 
 
   /* ---------- files set aside ---------- */
@@ -146,14 +160,18 @@ function createApp(opts = {}) {
    * picks one per request and works on it alone, so nothing a family does can reach another family's chart. */
   const households = new Map();
   const indexFile = path.join(dataDir, "households.json");
-  let index = { v: 1, households: [] }, indexMtime = 0, indexSaved = 0;
+  let index = { v: 1, households: [], pending: [], spent: [] }, indexMtime = 0, indexSaved = 0;
+  // pending: sign-ups waiting for their email link to be opened (the family is made then, not before, so a mistyped
+  // address leaves nothing behind). spent: sign-in links already used, by nonce, until they would have expired anyway.
+  const pruneIndex = () => { const t = now(); index.pending = (index.pending || []).filter((p) => p.exp > t); index.spent = (index.spent || []).filter((x) => x.exp > t); };
   const hDir = (id) => path.join(dataDir, "households", id);
   const CODE_CHARS = "23456789abcdefghjkmnpqrstuvwxyz"; // no 0, 1, i, l or o: the code gets read out across a kitchen
   const slug = (x) => String(x || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 20) || "family";
   const freshCode = (name) => { for (;;) { let c = slug(name) + "-"; for (let i = 0; i < 4; i++) c += CODE_CHARS[crypto.randomInt(CODE_CHARS.length)]; if (!index.households.some((r) => r.code === c)) return c; } };
   const newRec = (o) => ({ id: o.id || "h_" + crypto.randomBytes(5).toString("hex"), code: o.code || freshCode(o.name), name: String(o.name || "").trim().slice(0, 24), owner: String(o.owner || "").trim().slice(0, 120),
-    pin: hashPin(o.pin), adultPin: o.adultPin ? hashPin(o.adultPin) : "", pinTag: o.pinTag || crypto.randomBytes(8).toString("hex"), created: now(), lastActive: now(), flags: { sms: !!o.sms, suspended: false, demo: !!o.demo } });
+    pin: o.pinHash || hashPin(o.pin), adultPin: o.adultPin ? hashPin(o.adultPin) : "", pinTag: o.pinTag || crypto.randomBytes(8).toString("hex"), created: now(), lastActive: now(), flags: { sms: !!o.sms, suspended: false, demo: !!o.demo } });
   function saveIndex() {
+    pruneIndex();
     const tmp = indexFile + "." + process.pid + ".tmp";
     fs.writeFileSync(tmp, JSON.stringify(index, null, 1), { mode: 0o600 }); // owner emails and PIN hashes
     fs.renameSync(tmp, indexFile);
@@ -172,7 +190,7 @@ function createApp(opts = {}) {
     const j = readIndex(); if (!j) return;
     // Households already open keep their record object: their PIN and tag changes are saved through it, so the index
     // must point at that object, not at a fresh copy from the file. Fields the file has newer are folded in.
-    index = { v: j.v || 1, households: j.households.map((r) => { const cur = households.get(r.id); if (!cur) return r; Object.assign(cur.rec, r); return cur.rec; }) };
+    index = { v: j.v || 1, households: j.households.map((r) => { const cur = households.get(r.id); if (!cur) return r; Object.assign(cur.rec, r); return cur.rec; }), pending: j.pending || [], spent: j.spent || [] };
     index.households.forEach((rec) => { if (!households.has(rec.id)) households.set(rec.id, openHousehold(rec).start()); });
   }
   const byCode = (code) => { let H = [...households.values()].find((x) => x.rec.code === code); if (!H) { refreshIndex(); H = [...households.values()].find((x) => x.rec.code === code); } return H || null; };
@@ -186,7 +204,7 @@ function createApp(opts = {}) {
   }
   function createHousehold(o) {
     if (!multi) throw new Error("households need HOUSEHOLDS=1");
-    if (!/^\d{4,8}$/.test(String(o.pin || ""))) throw new Error("PIN must be 4 to 8 digits");
+    if (!o.pinHash && !/^\d{4,8}$/.test(String(o.pin || ""))) throw new Error("PIN must be 4 to 8 digits");
     if (o.adultPin && !/^\d{4,8}$/.test(String(o.adultPin))) throw new Error("grown-up PIN must be 4 to 8 digits");
     const rec = newRec(o);
     index.households.push(rec); saveIndex();
@@ -320,7 +338,7 @@ function createApp(opts = {}) {
 
   if (multi) {
     const legacyStore = path.join(dataDir, "store.json");
-    if (fs.existsSync(indexFile)) { const j = readIndex(); if (j) index = j; try { indexMtime = fs.statSync(indexFile).mtimeMs; } catch {} }
+    if (fs.existsSync(indexFile)) { const j = readIndex(); if (j) index = Object.assign({ pending: [], spent: [] }, j); try { indexMtime = fs.statSync(indexFile).mtimeMs; } catch {} }
     else if (fs.existsSync(legacyStore)) {
       // First boot with HOUSEHOLDS=1 on a single-family server: the family becomes household "default", its PINs move
       // from the environment into the index, and its phones keep their cookies (same secret, same tag, no household named).
@@ -364,7 +382,7 @@ function createApp(opts = {}) {
       const t = Number(m && m.target);
       return { id: str(m && m.id, 24), name: str(m && m.name, 20), kind, age: AGES.has(m && m.age) ? m.age : "",
         target: Number.isInteger(t) && t >= 1 && t <= 30 ? t : CONTENT.kinds[kind].target,
-        phone: NOTIFY.normalisePhone(m && m.phone), sms: !!(m && m.sms), buddy: str(m && m.buddy, 24) };
+        phone: NOTIFY.normalisePhone(m && m.phone), sms: !!(m && m.sms), buddy: str(m && m.buddy, 24), email: kind === "adult" ? MAIL.cleanEmail(m && m.email) : "" };
     }).filter((m) => /^[A-Za-z0-9]{1,24}$/.test(m.id) && m.name);
     family.forEach((m) => { if (!m.buddy || m.buddy === m.id || !family.some((o) => o.id === m.buddy)) m.buddy = ""; });
     if (!family.length) return null;
@@ -413,6 +431,14 @@ function createApp(opts = {}) {
   };
   const hCookie = (req, hid) => "pt_h=" + hid + "; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000" + (isHttps(req) ? "; Secure" : ""); // a pointer, not a credential: Lax so a join link can set it
   const isHttps = (req) => (trustProxy ? String(req.headers["x-forwarded-proto"] || "").startsWith("https") : !!req.socket.encrypted);
+  const origin = (req) => { if (appUrl) return appUrl; const h = String(req.headers.host || ""); return (isHttps(req) ? "https" : "http") + "://" + (/^[A-Za-z0-9.:[\]-]{1,253}$/.test(h) ? h : "localhost"); };
+  // A link in an email: a signed payload with a nonce and a 15-minute expiry. Sign-ups name a pending record; sign-ins
+  // name a household and a person, and are single use by nonce.
+  const linkToken = (o) => { const p = Buffer.from(JSON.stringify(Object.assign({ n: crypto.randomBytes(12).toString("hex"), exp: now() + LINK_MS }, o))).toString("base64url"); return p + "." + sign(p); };
+  const readLink = (tok) => { const j = parsePayload(tok); return j && typeof j.n === "string" && typeof j.exp === "number" && (j.k === "signup" || j.k === "in") ? j : null; };
+  const linkPage = (title, body, form) => "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"robots\" content=\"noindex\"><title>" + esc(title) + "</title>" +
+    "<style>body{margin:0;background:#f4f3fa;color:#1c1a33;font:17px/1.55 system-ui,-apple-system,'Segoe UI',sans-serif}main{max-width:420px;margin:0 auto;padding:48px 18px}h1{font-size:1.6rem;line-height:1.15;margin:0 0 12px}p{color:#4a476a}button,a.btn{display:inline-block;margin-top:14px;background:#5b4bf0;color:#fff;border:0;border-radius:14px;padding:14px 22px;font:inherit;font-weight:700;text-decoration:none;cursor:pointer}@media(prefers-color-scheme:dark){body{background:#131225;color:#ededf7}p{color:#c9c6e4}}</style></head><body><main><h1>" + esc(title) + "</h1><p>" + body + "</p>" + form + "</main>" + (form ? "<script src=\"/m.js\"></script>" : "") + "</body></html>";
+  const LINK_HEADERS = { "Content-Type": "text/html; charset=utf-8", "X-Robots-Tag": "noindex, nofollow", "Content-Security-Policy": CSP.replace("form-action 'none'", "form-action 'self'") };
   function cookies(req) { const o = {}; String(req.headers.cookie || "").split(";").forEach((c) => { const i = c.indexOf("="); if (i > 0) o[c.slice(0, i).trim()] = decodeURIComponent(c.slice(i + 1).trim()); }); return o; }
   function send(res, code, body, headers = {}) {
     const isObj = body !== undefined && typeof body !== "string" && !Buffer.isBuffer(body);
@@ -442,12 +468,100 @@ function createApp(opts = {}) {
     });
   }
 
+  /* ---------- sign-up and sign-in by email (docs/design/HOUSEHOLDS.md, step 3) ----------
+   * The grown-up who starts a family, or signs into one on a new phone, gets a link by email. Nothing is made until
+   * the link is opened, the reply is the same whether or not the address is known, and a link is good once and for
+   * fifteen minutes. The link opens a small page that posts itself: a mail scanner that fetches every link in an
+   * email must not spend it. */
+  const SAME_REPLY = { ok: true, sent: true };
+  async function askForLink(req, res, signup) {
+    const ip = clientIp(req);
+    const body = await readJson(req);
+    const email = MAIL.cleanEmail(body.email);
+    if (!email) return send(res, 400, { error: "That does not look like an email address" });
+    if (mailLimited("ip:" + ip) || mailLimited("em:" + email)) { log("mail limited", ip); return send(res, 429, { error: "That is a few links in a row. Check your inbox, or wait an hour." }); }
+    const base = origin(req);
+    if (signup) {
+      const puppy = String(body.puppy || "").trim().slice(0, 24), name = String(body.name || "").trim().slice(0, 20), pin = String(body.pin || "");
+      if (!puppy || !name) return send(res, 400, { error: "Need the puppy's name and yours" });
+      if (!/^\d{4,8}$/.test(pin)) return send(res, 400, { error: "Family PIN: 4 to 8 digits" });
+      const tok = linkToken({ k: "signup" });
+      const j = readLink(tok);
+      index.pending.push({ n: j.n, exp: j.exp, email, puppy, name, pinHash: hashPin(pin) }); saveIndex();
+      const mine = signInLinks(email, base);
+      const text = "Hi " + name + ",\n\nTap this link on the phone you want to run " + puppy + "'s puppy school from, within 15 minutes:\n\n" + base + "/m/" + tok +
+        "\n\nIt makes the family and signs you in as the grown-up. The kids join with the family PIN you chose.\n\n" +
+        (mine.length ? "You already have a puppy school here. To open it instead:\n" + mine.map((x) => x.name + "'s: " + x.url).join("\n") + "\n\n" : "") +
+        "If you did not ask for this, ignore this email and nothing happens.\n\nPuppy School HQ";
+      log("signup link", email, ip);
+      await mailer.send({ to: email, subject: "Start " + puppy + "'s puppy school", text });
+      return send(res, 200, SAME_REPLY);
+    }
+    const mine = signInLinks(email, base);
+    log("sign-in link", email, ip, mine.length ? "sent" : "no match");
+    if (mine.length) await mailer.send({ to: email, subject: "Sign in to " + (mine.length === 1 ? mine[0].name + "'s" : "your") + " puppy school",
+      text: "Hi,\n\nTap the link on the phone you want to sign in on, within 15 minutes:\n\n" + mine.map((x) => (mine.length > 1 ? x.name + "'s puppy school: " : "") + x.url).join("\n\n") +
+        "\n\nIf you did not ask for this, ignore this email and nothing happens.\n\nPuppy School HQ" });
+    return send(res, 200, SAME_REPLY);
+  }
+  // Every household this address is a grown-up in, as sign-in links. An address on a person's row counts; the owner
+  // address in the index counts until the family's Settings are saved, when the row is what matters.
+  function signInLinks(email, base) {
+    refreshIndex();
+    const out = [];
+    households.forEach((H) => {
+      if (H.suspended) return;
+      const fam = (H.db.settings && H.db.settings.family) || [];
+      let who = fam.find((x) => x.kind === "adult" && x.email === email);
+      if (!who && !H.db.settings && H.rec.owner === email) who = { id: "" }; // a family not set up yet: the link lands in Settings
+      if (!who) return;
+      if (H.db.settings && !who.id) return;
+      out.push({ name: H.rec.name || "your", url: base + "/m/" + linkToken({ k: "in", h: H.id, p: who.id }) });
+    });
+    return out;
+  }
+  async function openLink(req, res, tok) {
+    const bounce = (why) => (req.method === "GET" ? send(res, 200, linkPage("This link has stopped working", "Links from emails work once, for 15 minutes. Open the app and ask for a new one.", "<a class=\"btn\" href=\"/\">Open Puppy School HQ</a>"), LINK_HEADERS) : send(res, 302, "", { Location: "/?link=" + why }));
+    const j = readLink(tok);
+    if (!j) return bounce("bad");
+    if (j.exp <= now()) return bounce("expired");
+    refreshIndex();
+    const pending = j.k === "signup" ? index.pending.find((x) => x.n === j.n) : null;
+    if (j.k === "signup" && !pending) return bounce("used");
+    if (j.k === "in" && index.spent.some((x) => x.n === j.n)) return bounce("used");
+    const T = j.k === "in" ? households.get(j.h) : null;
+    if (j.k === "in" && !T) return bounce("bad");
+    const who = j.k === "in" ? (j.p ? T.member(j.p) : (!T.db.settings ? { id: "" } : null)) : null;
+    if (j.k === "in" && (!who || (who.id && who.kind !== "adult"))) return bounce("bad");
+    if (req.method !== "POST") {
+      const name = j.k === "signup" ? pending.puppy : (T.rec.name || "your");
+      return send(res, 200, linkPage("Opening " + name + "'s puppy school", "One tap and you are in on this phone.", "<form method=\"post\" action=\"/m/" + tok + "\"><button type=\"submit\">Continue</button></form>"), LINK_HEADERS);
+    }
+    const setCookies = [];
+    if (j.k === "signup") {
+      index.pending = index.pending.filter((x) => x.n !== j.n); // single use: the record goes before the family is made
+      const made = createHousehold({ name: pending.puppy, owner: pending.email, pinHash: pending.pinHash });
+      const H = households.get(made.id);
+      H.db.starter = { puppy: pending.puppy, name: pending.name, email: pending.email }; H.persist();
+      log("signup done", H.id, H.rec.code);
+      setCookies.push(hCookie(req, H.id), "pt_session=" + H.makeToken() + "; Path=/; HttpOnly; SameSite=Strict; Max-Age=" + Math.floor(sessionDays * 86400) + (isHttps(req) ? "; Secure" : ""));
+    } else {
+      index.spent.push({ n: j.n, exp: j.exp }); saveIndex();
+      T.touch();
+      log("sign-in by email", T.id, who.id || "(no settings yet)");
+      setCookies.push(hCookie(req, T.id), "pt_session=" + T.makeToken() + "; Path=/; HttpOnly; SameSite=Strict; Max-Age=" + Math.floor(sessionDays * 86400) + (isHttps(req) ? "; Secure" : ""));
+      if (who.id) setCookies.push(T.meCookie(req, who.id)); // the email proved who they are: no grown-up PIN on top
+    }
+    return send(res, 302, "", { Location: "/#today", "Set-Cookie": setCookies });
+  }
+
   /* ---------- routes ---------- */
   async function handle(req, res) {
     const u = new URL(req.url, "http://x");
     const p = u.pathname;
     let m;
     if (!p.startsWith("/api/")) {
+      if (multi && (m = p.match(/^\/m\/([A-Za-z0-9_-]{20,400}\.[A-Za-z0-9_-]{20,100})$/))) return openLink(req, res, m[1]);
       if (req.method !== "GET" && req.method !== "HEAD") return send(res, 405, "Method not allowed");
       if (multi && (m = p.match(/^\/j\/([a-z0-9-]{3,40})$/))) { // the join link: this phone belongs to that family; the PIN screen follows
         const ip = clientIp(req);
@@ -474,7 +588,8 @@ function createApp(opts = {}) {
     // one a session cookie names, or the carried-over family for phones from before HOUSEHOLDS=1.
     const ck = cookies(req);
     const H = resolveHousehold(ck);
-    if (p === "/api/household" && req.method === "GET") return send(res, 200, { households: multi, code: multi && H ? H.rec.code : null, name: multi && H ? H.rec.name : "" });
+    if (p === "/api/household" && req.method === "GET") return send(res, 200, { households: multi, signup: !!mailer, code: multi && H ? H.rec.code : null, name: multi && H ? H.rec.name : "" });
+    if ((p === "/api/signup" || p === "/api/email") && req.method === "POST") return mailer ? askForLink(req, res, p === "/api/signup") : send(res, 409, { error: "This server hosts one family. Ask whoever runs it for the PIN." });
     if (!H) return send(res, 401, { error: "Which family? Open your family's join link first.", code: "household" });
     if (H.suspended) return send(res, 403, { error: "This family's school is paused. Ask whoever runs the server." });
     const { db, persist, photoFile, stateOut, member, removePerson, restorePerson, adultPinMatches, hasAdultPin, makeToken, validToken, validMe, meCookie } = H;
@@ -499,8 +614,9 @@ function createApp(opts = {}) {
     const hasAdult = !!(db.settings && db.settings.family.some((x) => x.kind === "adult"));
     // Phone numbers go only to grown-ups' phones once the family has a grown-up (kids see the family read-only anyway).
     // In an all-kids family the kids are the editors, so they keep the full record or a save would wipe the numbers.
-    const forKids = (st) => (st && hasAdult && !isAdult ? Object.assign({}, st, { family: st.family.map((m) => { const c = Object.assign({}, m); delete c.phone; return c; }) }) : st);
-    const out = (extra) => Object.assign(stateOut(), { settings: forKids(db.settings), me: me ? me.id : null, adultPin: hasAdultPin, household: multi ? { code: H.rec.code, name: H.rec.name } : null }, extra || {});
+    const forKids = (st) => (st && hasAdult && !isAdult ? Object.assign({}, st, { family: st.family.map((m) => { const c = Object.assign({}, m); delete c.phone; delete c.email; return c; }) }) : st);
+    const out = (extra) => Object.assign(stateOut(), { settings: forKids(db.settings), me: me ? me.id : null, adultPin: hasAdultPin, household: multi ? { code: H.rec.code, name: H.rec.name } : null,
+      starter: !db.settings && db.starter ? db.starter : null }, extra || {}); // what the sign-up form said, to prefill the first Settings
     const needMe = () => send(res, 403, { error: "Pick yourself first", code: "pick" });
 
     if (p === "/api/state" && req.method === "GET") {
@@ -528,6 +644,7 @@ function createApp(opts = {}) {
       if (hasAdult && !isAdult) return send(res, 403, { error: "Ask a grown-up to change the family" });
       const s = cleanSettings(await readJson(req));
       if (!s) return send(res, 400, { error: "Need at least one family member" });
+      if (db.starter) delete db.starter; // the grown-up is on a row now, email and all
       const stale = s.family.find((m) => (db.removals || []).some((r) => r.person.id === m.id)); // a Settings page opened before someone was removed
       if (stale) return send(res, 409, { error: stale.name + " was just removed. Reload, then use Undo in Settings to bring them back." });
       db.settings = s; persist(); return send(res, 200, out());
@@ -780,6 +897,7 @@ function createApp(opts = {}) {
   server.households = { multi, create: createHousehold, get: (id) => households.get(id) || null, byCode, reload: refreshIndex,
     list: () => index.households.map((r) => ({ id: r.id, code: r.code, name: r.name, owner: r.owner, created: r.created, lastActive: r.lastActive, flags: r.flags, people: ((households.get(r.id) || {}).db || {}).settings ? households.get(r.id).db.settings.family.length : 0 })) };
   server.notifier = households.has("default") ? households.get("default").notifier : null;
+  server.mailer = mailer;
   server.on("close", () => households.forEach((H) => H.stop()));
   return server;
 }
