@@ -228,3 +228,24 @@ test("a household added to the index by another process is found on the next mis
   assert.equal(r.status, 403); assert.match(r.json.error, /paused/);
   assert.equal((await one.call("POST", "/api/logout")).status, 200, "logging out still works");
 });
+
+test("a PIN change made after the index was re-read from disk is saved, not lost to a stale record", async () => {
+  const dir = tmp();
+  const one = await boot({ households: true, dataDir: dir });
+  const A = one.server.households.create({ name: "Biscuit", pin: "111111" });
+  const two = await boot({ households: true, dataDir: dir }); // opens A from the file at boot
+  await new Promise((r) => setTimeout(r, 20));
+  const B = one.server.households.create({ name: "Rolo", pin: "222222" }); // the file changes under two
+  assert.equal((await two.call("GET", "/j/" + B.code)).status, 302, "two re-reads the index and finds B");
+  const a = await login(two, "111111", A.id);
+  const aCk = "pt_h=" + A.id + "; pt_session=" + a.jar.pt_session;
+  await two.call("PUT", "/api/settings", settingsFor("Biscuit", true), aCk);
+  const me = await two.call("POST", "/api/me", { pid: "a1" }, aCk);
+  const r = await two.call("PUT", "/api/pins", { pin: "333333" }, aCk + "; pt_me=" + me.jar.pt_me);
+  assert.equal(r.status, 200);
+  assert.equal((await login(two, "333333", A.id)).status, 200);
+  const three = await boot({ households: true, dataDir: dir }); // what is on disk is what counts
+  assert.equal((await login(three, "111111", A.id)).status, 401);
+  assert.equal((await login(three, "333333", A.id)).status, 200);
+  assert.equal((await login(three, "222222", B.id)).status, 200, "B survived the save too");
+});

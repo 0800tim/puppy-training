@@ -170,7 +170,9 @@ function createApp(opts = {}) {
     if (mt === indexMtime) return;
     indexMtime = mt;
     const j = readIndex(); if (!j) return;
-    index = j;
+    // Households already open keep their record object: their PIN and tag changes are saved through it, so the index
+    // must point at that object, not at a fresh copy from the file. Fields the file has newer are folded in.
+    index = { v: j.v || 1, households: j.households.map((r) => { const cur = households.get(r.id); if (!cur) return r; Object.assign(cur.rec, r); return cur.rec; }) };
     index.households.forEach((rec) => { if (!households.has(rec.id)) households.set(rec.id, openHousehold(rec).start()); });
   }
   const byCode = (code) => { let H = [...households.values()].find((x) => x.rec.code === code); if (!H) { refreshIndex(); H = [...households.values()].find((x) => x.rec.code === code); } return H || null; };
