@@ -588,9 +588,12 @@ function createApp(opts = {}) {
     // one a session cookie names, or the carried-over family for phones from before HOUSEHOLDS=1.
     const ck = cookies(req);
     const H = resolveHousehold(ck);
-    if (p === "/api/household" && req.method === "GET") return send(res, 200, { households: multi, signup: !!mailer, code: multi && H ? H.rec.code : null, name: multi && H ? H.rec.name : "" });
+    // A phone with no cookies at all has never been here: it gets the welcome screen, not the carried-over family's
+    // PIN screen. (A PIN typed with no cookies still lands in that family, so its phones work without a join link.)
+    const bare = multi && !ck.pt_h && !ck.pt_session && !ck.pt_me;
+    if (p === "/api/household" && req.method === "GET") return send(res, 200, { households: multi, signup: !!mailer, code: multi && H && !bare ? H.rec.code : null, name: multi && H && !bare ? H.rec.name : "" });
     if ((p === "/api/signup" || p === "/api/email") && req.method === "POST") return mailer ? askForLink(req, res, p === "/api/signup") : send(res, 409, { error: "This server hosts one family. Ask whoever runs it for the PIN." });
-    if (!H) return send(res, 401, { error: "Which family? Open your family's join link first.", code: "household" });
+    if (!H || (bare && p === "/api/state")) return send(res, 401, { error: "Which family? Open your family's join link first.", code: "household" });
     if (H.suspended) return send(res, 403, { error: "This family's school is paused. Ask whoever runs the server." });
     const { db, persist, photoFile, stateOut, member, removePerson, restorePerson, adultPinMatches, hasAdultPin, makeToken, validToken, validMe, meCookie } = H;
 

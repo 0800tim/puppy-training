@@ -200,6 +200,11 @@ test("a single-family server switched to HOUSEHOLDS=1 carries its family over an
   // and a fresh login with the same PIN, no cookies at all, lands in the carried-over family
   const again = await multi.call("POST", "/api/login", { pin: "482913" });
   assert.equal(again.status, 200); assert.equal(again.jar.pt_h, "default");
+  // but a phone with no cookies at all is a stranger: the welcome screen, not this family's PIN screen
+  const bare = await multi.call("GET", "/api/state");
+  assert.equal(bare.status, 401); assert.equal(bare.json.code, "household");
+  assert.equal((await multi.call("GET", "/api/household")).json.code, null);
+  assert.equal((await multi.call("GET", "/api/household", undefined, "pt_session=expired.junk")).json.code, rec.code, "an old cookie, even a dead one, still names the family");
   // a second family on the same server starts empty and cannot use the gateway
   const B = multi.server.households.create({ name: "Rolo", pin: "222222" });
   const b = await login(multi, "222222", B.id);
