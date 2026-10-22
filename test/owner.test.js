@@ -49,7 +49,7 @@ test("an owner address gets an owner link by email; the owner API needs that coo
   const H = app.server.households.get(A.id);
   H.db.settings = { puppy: { name: "Biscuit", sex: "girl" }, start: "2026-10-01", family: [{ id: "a1", name: "Ann", kind: "adult", target: 10, email: "ann@example.nz" }, { id: "k1", name: "Kit", kind: "kid", target: 21 }] }; H.persist();
   const ck = await ownerSignIn(app);
-  assert.match(app.mailer.outbox[0].subject, /Sign in to the owner page's puppy school|your puppy school/);
+  assert.equal(app.mailer.outbox[0].subject, "Sign in to the owner page");
   const r = await app.call("GET", "/api/owner/households", undefined, ck);
   assert.equal(r.status, 200);
   assert.deepEqual(r.json.owners, ["tim@example.nz", "other@example.nz"]);

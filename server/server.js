@@ -526,7 +526,8 @@ function createApp(opts = {}) {
     const mine = signInLinks(email, base);
     if (owners.has(email)) mine.push({ name: "the owner page", url: base + "/m/" + linkToken({ k: "owner" }) });
     log("sign-in link", email, ip, mine.length ? "sent" : "no match");
-    if (mine.length) await mailer.send({ to: email, subject: "Sign in to " + (mine.length === 1 ? mine[0].name + "'s" : "your") + " puppy school",
+    const subject = mine.length !== 1 ? "Sign in to your puppy school" : mine[0].name === "the owner page" ? "Sign in to the owner page" : "Sign in to " + mine[0].name + "'s puppy school";
+    if (mine.length) await mailer.send({ to: email, subject,
       text: "Hi,\n\nTap the link on the phone you want to sign in on, within 15 minutes:\n\n" + mine.map((x) => (mine.length > 1 ? (x.name === "the owner page" ? "The owner page: " : x.name + "'s puppy school: ") : "") + x.url).join("\n\n") +
         "\n\nIf you did not ask for this, ignore this email and nothing happens.\n\nPuppy School HQ" });
     return send(res, 200, SAME_REPLY);
