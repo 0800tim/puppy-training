@@ -126,6 +126,7 @@ Then put HTTPS in front of it (Caddy, nginx, a Cloudflare Tunnel or Tailscale Fu
 | `MAIL_FROM` | unset | The sender, `Puppy School HQ <puppy@example.nz>`. Required for `MAIL=sendgrid`; the domain must be authenticated in SendGrid or the links land in spam. |
 | `SENDGRID_API_KEY` | unset | A SendGrid key with Mail Send only. |
 | `APP_URL` | the request's host | Where links in emails point, such as `https://puppy.example.nz`. Set it when the server sits behind something that rewrites the Host header. |
+| `OWNER_EMAILS` | unset | With `HOUSEHOLDS=1`: comma-separated addresses that may open the owner page (`/owner.html`, a list of families with pause, delete and invite links; never a chart). They sign in by email like any grown-up. |
 | `PUSH_SUBJECT` | `mailto:hello@growthspurt.agency` | Contact for push services (VAPID subject). Keys are generated into `DATA_DIR/vapid.json`. |
 | `AIVA_SMS_API_URL`, `AIVA_SMS_API_KEY`, `AIVA_SMS_DEVICE_ID`, `AIVA_SMS_SIM_SUBSCRIPTION_ID` | unset | Optional SMS gateway for daily texts. Leave unset and texts are simply off. |
 | `SESSION_SECRET` | generated | Signs the cookies. Generated into `DATA_DIR/secret.key` if unset. |

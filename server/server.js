@@ -82,6 +82,11 @@ function createApp(opts = {}) {
   const mailer = multi ? (opts.mailer || MAIL.makeMailer(process.env, { log })) : null;
   const appUrl = String(opts.appUrl ?? process.env.APP_URL ?? "").replace(/\/+$/, ""); // where links in emails point; else the request's own host
   const LINK_MS = 15 * 60e3;
+  // The operator (docs/design/HOUSEHOLDS.md, step 4): addresses in OWNER_EMAILS sign in by email like any grown-up and
+  // get the owner page as well, which lists families and never shows a chart. Deleting a family waits WIPE_MS so a
+  // change of heart can undo it; a demo family lives DEMO_MS.
+  const owners = new Set(String(opts.ownerEmails ?? process.env.OWNER_EMAILS ?? "").split(",").map((x) => x.trim().toLowerCase()).filter(Boolean));
+  const OWNER_MS = 7 * 864e5, WIPE_MS = 7 * 864e5, DEMO_MS = 864e5;
 
   fs.mkdirSync(dataDir, { recursive: true });
 
@@ -246,7 +251,8 @@ function createApp(opts = {}) {
     const H = { id: rec.id, rec, db, dir, storeFile, photoFile, persist, makeToken, validToken, validMe, meCookie, pinMatches, adultPinMatches, notifier: null,
       get hasAdultPin() { return !!rec.adultPin; },
       get sms() { return !!smsSender && (!multi || !!(rec.flags && rec.flags.sms)); },
-      get suspended() { return !!(rec.flags && rec.flags.suspended); } };
+      get suspended() { return !!(rec.flags && (rec.flags.suspended || rec.flags.wipeAt)); },
+      get demo() { return !!(rec.flags && rec.flags.demo); } };
     H.setPins = (np, na) => { // null leaves one alone; "" clears the grown-up PIN
       if (np !== null) { rec.pin = hashPin(np); rec.pinTag = crypto.randomBytes(8).toString("hex"); }
       if (na !== null) rec.adultPin = na ? hashPin(na) : "";
@@ -254,7 +260,7 @@ function createApp(opts = {}) {
     };
     H.touch = () => { if (multi) { rec.lastActive = now(); if (now() - indexSaved > 3600e3) saveIndex(); } };
     H.start = () => {
-      if (!H.notifier && !opts.noScheduler) H.notifier = NOTIFY.createNotifier({ db, C: CONTENT, R: REWARDS, keys: vapid, subject: pushSubject, log, persist, sendPush: opts.sendPush || PUSH.sendPush,
+      if (!H.notifier && !opts.noScheduler && !H.demo) H.notifier = NOTIFY.createNotifier({ db, C: CONTENT, R: REWARDS, keys: vapid, subject: pushSubject, log, persist, sendPush: opts.sendPush || PUSH.sendPush,
         sendSms: H.sms ? smsSender : (async () => { throw new Error("no SMS gateway configured"); }), sms: H.sms, now: opts.now ? () => new Date(now()) : undefined });
       return H;
     };
@@ -372,6 +378,24 @@ function createApp(opts = {}) {
   pushReady = !!vapid;
   households.forEach((H) => H.start());
 
+  // Families due to go: deleted ones after their grace period, demo ones after a day. The folder is removed; the
+  // nightly backup copies still roll off after their own 30 days (docs/PRIVACY.md).
+  function sweep() {
+    if (!multi) return [];
+    refreshIndex();
+    const t = now(), gone = [];
+    index.households.filter((r) => (r.flags && r.flags.wipeAt && r.flags.wipeAt <= t) || (r.flags && r.flags.demo && r.created + DEMO_MS <= t)).forEach((r) => {
+      const H = households.get(r.id); if (H) H.stop(); households.delete(r.id);
+      try { fs.rmSync(hDir(r.id), { recursive: true, force: true }); } catch (e) { log("could not remove", hDir(r.id), e.message); }
+      gone.push(r.id); log("household removed", r.id, r.code, r.flags.demo ? "(demo)" : "(deleted)");
+    });
+    if (gone.length) { index.households = index.households.filter((r) => !gone.includes(r.id)); saveIndex(); }
+    return gone;
+  }
+  sweep();
+  const sweeper = multi && !opts.noScheduler ? setInterval(sweep, 10 * 60e3) : null;
+  if (sweeper) sweeper.unref();
+
   function cleanSettings(x) {
     if (!x || typeof x !== "object") return null;
     const str = (v, n) => (typeof v === "string" ? v.trim().slice(0, n) : "");
@@ -435,7 +459,9 @@ function createApp(opts = {}) {
   // A link in an email: a signed payload with a nonce and a 15-minute expiry. Sign-ups name a pending record; sign-ins
   // name a household and a person, and are single use by nonce.
   const linkToken = (o) => { const p = Buffer.from(JSON.stringify(Object.assign({ n: crypto.randomBytes(12).toString("hex"), exp: now() + LINK_MS }, o))).toString("base64url"); return p + "." + sign(p); };
-  const readLink = (tok) => { const j = parsePayload(tok); return j && typeof j.n === "string" && typeof j.exp === "number" && (j.k === "signup" || j.k === "in") ? j : null; };
+  const readLink = (tok) => { const j = parsePayload(tok); return j && typeof j.n === "string" && typeof j.exp === "number" && (j.k === "signup" || j.k === "in" || j.k === "owner") ? j : null; };
+  const ownerCookie = (req, on) => "pt_owner=" + (on ? (() => { const p = Buffer.from(JSON.stringify({ k: "owner", exp: now() + OWNER_MS })).toString("base64url"); return p + "." + sign(p); })() : "") + "; Path=/; HttpOnly; SameSite=Strict; Max-Age=" + (on ? Math.floor(OWNER_MS / 1000) : 0) + (isHttps(req) ? "; Secure" : "");
+  const ownerOk = (ck) => { const j = parsePayload(ck.pt_owner); return !!j && j.k === "owner" && j.exp > now(); };
   const linkPage = (title, body, form) => "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"robots\" content=\"noindex\"><title>" + esc(title) + "</title>" +
     "<style>body{margin:0;background:#f4f3fa;color:#1c1a33;font:17px/1.55 system-ui,-apple-system,'Segoe UI',sans-serif}main{max-width:420px;margin:0 auto;padding:48px 18px}h1{font-size:1.6rem;line-height:1.15;margin:0 0 12px}p{color:#4a476a}button,a.btn{display:inline-block;margin-top:14px;background:#5b4bf0;color:#fff;border:0;border-radius:14px;padding:14px 22px;font:inherit;font-weight:700;text-decoration:none;cursor:pointer}@media(prefers-color-scheme:dark){body{background:#131225;color:#ededf7}p{color:#c9c6e4}}</style></head><body><main><h1>" + esc(title) + "</h1><p>" + body + "</p>" + form + "</main>" + (form ? "<script src=\"/m.js\"></script>" : "") + "</body></html>";
   const LINK_HEADERS = { "Content-Type": "text/html; charset=utf-8", "X-Robots-Tag": "noindex, nofollow", "Content-Security-Policy": CSP.replace("form-action 'none'", "form-action 'self'") };
@@ -498,9 +524,10 @@ function createApp(opts = {}) {
       return send(res, 200, SAME_REPLY);
     }
     const mine = signInLinks(email, base);
+    if (owners.has(email)) mine.push({ name: "the owner page", url: base + "/m/" + linkToken({ k: "owner" }) });
     log("sign-in link", email, ip, mine.length ? "sent" : "no match");
     if (mine.length) await mailer.send({ to: email, subject: "Sign in to " + (mine.length === 1 ? mine[0].name + "'s" : "your") + " puppy school",
-      text: "Hi,\n\nTap the link on the phone you want to sign in on, within 15 minutes:\n\n" + mine.map((x) => (mine.length > 1 ? x.name + "'s puppy school: " : "") + x.url).join("\n\n") +
+      text: "Hi,\n\nTap the link on the phone you want to sign in on, within 15 minutes:\n\n" + mine.map((x) => (mine.length > 1 ? (x.name === "the owner page" ? "The owner page: " : x.name + "'s puppy school: ") : "") + x.url).join("\n\n") +
         "\n\nIf you did not ask for this, ignore this email and nothing happens.\n\nPuppy School HQ" });
     return send(res, 200, SAME_REPLY);
   }
@@ -528,7 +555,13 @@ function createApp(opts = {}) {
     refreshIndex();
     const pending = j.k === "signup" ? index.pending.find((x) => x.n === j.n) : null;
     if (j.k === "signup" && !pending) return bounce("used");
-    if (j.k === "in" && index.spent.some((x) => x.n === j.n)) return bounce("used");
+    if (j.k !== "signup" && index.spent.some((x) => x.n === j.n)) return bounce("used");
+    if (j.k === "owner") {
+      if (req.method !== "POST") return send(res, 200, linkPage("Opening the owner page", "One tap and you are in on this phone.", "<form method=\"post\" action=\"/m/" + tok + "\"><button type=\"submit\">Continue</button></form>"), LINK_HEADERS);
+      index.spent.push({ n: j.n, exp: j.exp }); saveIndex();
+      log("owner signed in");
+      return send(res, 302, "", { Location: "/owner.html", "Set-Cookie": ownerCookie(req, true) });
+    }
     const T = j.k === "in" ? households.get(j.h) : null;
     if (j.k === "in" && !T) return bounce("bad");
     const who = j.k === "in" ? (j.p ? T.member(j.p) : (!T.db.settings ? { id: "" } : null)) : null;
@@ -553,6 +586,66 @@ function createApp(opts = {}) {
       if (who.id) setCookies.push(T.meCookie(req, who.id)); // the email proved who they are: no grown-up PIN on top
     }
     return send(res, 302, "", { Location: "/#today", "Set-Cookie": setCookies });
+  }
+
+  /* ---------- the owner page (docs/design/HOUSEHOLDS.md, step 4) ----------
+   * Names, codes, counts and flags only: the operator never sees a chart. */
+  const listOut = () => index.households.map((r) => { const H = households.get(r.id); return { id: r.id, code: r.code, name: r.name, owner: r.owner, created: r.created, lastActive: r.lastActive, flags: r.flags,
+    people: H && H.db.settings ? H.db.settings.family.length : 0, setUp: !!(H && H.db.settings) }; });
+  async function ownerRoutes(req, res, p, ck) {
+    if (p === "/api/owner/logout" && req.method === "POST") return send(res, 200, { ok: true }, { "Set-Cookie": ownerCookie(req, false) });
+    if (!ownerOk(ck)) return send(res, 401, { error: "Owner sign-in needed", code: "owner" });
+    const base = origin(req);
+    if (p === "/api/owner/households" && req.method === "GET") { refreshIndex(); return send(res, 200, { households: listOut(), owners: [...owners], mail: mailer.kind, base }); }
+    if (p === "/api/owner/households" && req.method === "POST") {
+      // an invite: the family exists now, with a join link for the kids' phones and, with an email, a sign-in link for the grown-up
+      const body = await readJson(req);
+      const name = String(body.name || "").trim().slice(0, 24), pin = String(body.pin || ""), adultPin = body.adultPin ? String(body.adultPin) : "", owner = MAIL.cleanEmail(body.owner);
+      if (!name) return send(res, 400, { error: "Need the puppy's name" });
+      if (!/^\d{4,8}$/.test(pin)) return send(res, 400, { error: "Family PIN: 4 to 8 digits" });
+      if (adultPin && !/^\d{4,8}$/.test(adultPin)) return send(res, 400, { error: "Grown-up PIN: 4 to 8 digits, or empty" });
+      if (body.owner && !owner) return send(res, 400, { error: "That does not look like an email address" });
+      const made = createHousehold({ name, pin, adultPin, owner, sms: !!body.sms });
+      const links = { join: base + "/j/" + made.code, signin: owner ? base + "/m/" + linkToken({ k: "in", h: made.id, p: "" }) : null };
+      log("owner created household", made.id, made.code);
+      return send(res, 200, { ok: true, id: made.id, code: made.code, links, households: listOut() });
+    }
+    let m;
+    if ((m = p.match(/^\/api\/owner\/households\/(h_[a-f0-9]{10}|default)$/))) {
+      refreshIndex();
+      const H = households.get(m[1]); if (!H) return send(res, 404, { error: "No such family" });
+      const f = H.rec.flags = H.rec.flags || {};
+      if (req.method === "PUT") {
+        const body = await readJson(req);
+        if ("suspended" in body) f.suspended = !!body.suspended;
+        if ("sms" in body) { f.sms = !!body.sms && !!smsSender; H.stop(); H.start(); } // the notifier is built with the flag
+        if (body.wipe === false) delete f.wipeAt;
+        if (body.signin === true && H.db.settings === null && H.rec.owner) { saveIndex(); return send(res, 200, { ok: true, link: base + "/m/" + linkToken({ k: "in", h: H.id, p: "" }), households: listOut() }); }
+        saveIndex(); log("owner changed", H.id, JSON.stringify(body));
+        return send(res, 200, { ok: true, households: listOut() });
+      }
+      if (req.method === "DELETE") {
+        f.wipeAt = now() + WIPE_MS; saveIndex(); log("owner delete requested", H.id);
+        return send(res, 200, { ok: true, wipeAt: f.wipeAt, households: listOut() });
+      }
+    }
+    if (p === "/api/owner/sweep" && req.method === "POST") return send(res, 200, { ok: true, removed: sweep(), households: listOut() });
+    return send(res, 404, { error: "Not found" });
+  }
+
+  /* ---------- a demo family: a sandbox for anyone Tim shows the app to, gone after a day ---------- */
+  const DEMO_PEOPLE = [{ id: "d1", name: "Sam", kind: "adult", target: 10, age: "", phone: "", sms: false, buddy: "", email: "" }, { id: "d2", name: "Alex", kind: "kid", target: 21, age: "8-9", phone: "", sms: false, buddy: "", email: "" }];
+  async function makeDemo(req, res) {
+    const ip = clientIp(req);
+    if (mailLimited("demo:" + ip)) return send(res, 429, { error: "That is a few demo families in a row. Wait an hour." });
+    const pin = String(crypto.randomInt(100000, 1000000));
+    const made = createHousehold({ name: "Biscuit", pin, demo: true });
+    const H = households.get(made.id);
+    H.db.settings = { puppy: { name: "Biscuit", sex: "girl", breed: "Labrador cross", born: "" }, start: localToday(), family: DEMO_PEOPLE.map((x) => Object.assign({}, x)) };
+    H.persist();
+    log("demo household", H.id, ip);
+    const session = "pt_session=" + H.makeToken() + "; Path=/; HttpOnly; SameSite=Strict; Max-Age=" + Math.floor(sessionDays * 86400) + (isHttps(req) ? "; Secure" : "");
+    return send(res, 200, { ok: true, code: made.code, pin, days: 1 }, { "Set-Cookie": [hCookie(req, H.id), session, H.meCookie(req, "d1")] });
   }
 
   /* ---------- routes ---------- */
@@ -593,6 +686,9 @@ function createApp(opts = {}) {
     const bare = multi && !ck.pt_h && !ck.pt_session && !ck.pt_me;
     if (p === "/api/household" && req.method === "GET") return send(res, 200, { households: multi, signup: !!mailer, code: multi && H && !bare ? H.rec.code : null, name: multi && H && !bare ? H.rec.name : "" });
     if ((p === "/api/signup" || p === "/api/email") && req.method === "POST") return mailer ? askForLink(req, res, p === "/api/signup") : send(res, 409, { error: "This server hosts one family. Ask whoever runs it for the PIN." });
+    if (multi && p.startsWith("/api/owner/")) return ownerRoutes(req, res, p, ck);
+    if (multi && p === "/api/demo" && req.method === "POST") return makeDemo(req, res);
+    if (H && H.rec.flags && H.rec.flags.wipeAt && p !== "/api/logout") return send(res, 403, { error: "This family's school is being deleted. Whoever runs the server can undo that for " + Math.max(1, Math.ceil((H.rec.flags.wipeAt - now()) / 864e5)) + " more day(s)." });
     if (!H || (bare && p === "/api/state")) return send(res, 401, { error: "Which family? Open your family's join link first.", code: "household" });
     if (H.suspended) return send(res, 403, { error: "This family's school is paused. Ask whoever runs the server." });
     const { db, persist, photoFile, stateOut, member, removePerson, restorePerson, adultPinMatches, hasAdultPin, makeToken, validToken, validMe, meCookie } = H;
@@ -618,7 +714,7 @@ function createApp(opts = {}) {
     // Phone numbers go only to grown-ups' phones once the family has a grown-up (kids see the family read-only anyway).
     // In an all-kids family the kids are the editors, so they keep the full record or a save would wipe the numbers.
     const forKids = (st) => (st && hasAdult && !isAdult ? Object.assign({}, st, { family: st.family.map((m) => { const c = Object.assign({}, m); delete c.phone; delete c.email; return c; }) }) : st);
-    const out = (extra) => Object.assign(stateOut(), { settings: forKids(db.settings), me: me ? me.id : null, adultPin: hasAdultPin, household: multi ? { code: H.rec.code, name: H.rec.name } : null,
+    const out = (extra) => Object.assign(stateOut(), { settings: forKids(db.settings), me: me ? me.id : null, adultPin: hasAdultPin, household: multi ? { code: H.rec.code, name: H.rec.name, owner: !!(isAdult && (!H.rec.owner || (me && me.email === H.rec.owner))), demo: H.demo } : null,
       starter: !db.settings && db.starter ? db.starter : null }, extra || {}); // what the sign-up form said, to prefill the first Settings
     const needMe = () => send(res, 403, { error: "Pick yourself first", code: "pick" });
 
@@ -851,6 +947,15 @@ function createApp(opts = {}) {
       if (np === null) return send(res, 200, { ok: true, signedOut: false });
       return send(res, 200, { ok: true, signedOut: true }, { "Set-Cookie": ["pt_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0", "pt_me=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0"] });
     }
+    // The grown-up who started the family can delete it: paused at once, gone for good after the grace period.
+    if (p === "/api/household" && req.method === "DELETE") {
+      if (!multi) return send(res, 409, { error: "This server hosts one family" });
+      if (!me) return needMe();
+      if (!isAdult || (H.rec.owner && me.email !== H.rec.owner)) return send(res, 403, { error: "Only the grown-up who started the family can delete it" });
+      H.rec.flags.wipeAt = now() + WIPE_MS; saveIndex();
+      log("household delete requested", H.id, "by", me.id);
+      return send(res, 200, { ok: true, days: Math.round(WIPE_MS / 864e5) }, { "Set-Cookie": ["pt_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0", "pt_me=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0"] });
+    }
     if (p === "/api/share" && req.method === "POST") {
       if (!isAdult) return send(res, 403, { error: "Grown-ups only" });
       db.share = { token: crypto.randomBytes(12).toString("hex"), created: now() };
@@ -897,11 +1002,10 @@ function createApp(opts = {}) {
       if (!res.headersSent) send(res, code, { error: code === 500 ? "Server error" : e.message });
     });
   });
-  server.households = { multi, create: createHousehold, get: (id) => households.get(id) || null, byCode, reload: refreshIndex,
-    list: () => index.households.map((r) => ({ id: r.id, code: r.code, name: r.name, owner: r.owner, created: r.created, lastActive: r.lastActive, flags: r.flags, people: ((households.get(r.id) || {}).db || {}).settings ? households.get(r.id).db.settings.family.length : 0 })) };
+  server.households = { multi, create: createHousehold, get: (id) => households.get(id) || null, byCode, reload: refreshIndex, sweep, list: listOut };
   server.notifier = households.has("default") ? households.get("default").notifier : null;
   server.mailer = mailer;
-  server.on("close", () => households.forEach((H) => H.stop()));
+  server.on("close", () => { households.forEach((H) => H.stop()); if (sweeper) clearInterval(sweeper); });
   return server;
 }
 

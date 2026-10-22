@@ -49,6 +49,16 @@ first name, puppy's name, a hash of the chosen PIN) and is then forgotten.
 The log records "signup link" and "sign-in link" with the address and the
 visitor's IP address, as it does for failed PINs.
 
+Deleting a family (step 4): the grown-up who started it can delete it from
+Settings, and the operator can from the owner page. The family is paused at
+once (every phone signed out, the PIN door shut) and the folder is removed
+seven days later, unless the operator undoes it in that window. The nightly
+backup copies then roll off after their own 30 days. A demo family ("Try it
+with a sample family" on the welcome screen) is a real folder with made-up
+people, no email, no reminders and no texts, removed a day after it was made.
+The owner page shows names, codes, the owner's address, counts and flags,
+never a chart.
+
 The identity on every entry (`by`) is the design: accountability instead of
 approval queues. It also means the chart is a fairly complete picture of each
 person's days.

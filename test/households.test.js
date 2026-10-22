@@ -263,7 +263,7 @@ test("before the PIN a phone can ask which family it is in; health says the serv
   assert.deepEqual((await app.call("GET", "/api/household", undefined, "pt_h=" + A.id)).json, { households: true, signup: true, code: A.code, name: "Biscuit" });
   const a = await login(app, "111111", A.id);
   const st = await app.call("GET", "/api/state", undefined, "pt_h=" + A.id + "; pt_session=" + a.jar.pt_session);
-  assert.deepEqual(st.json.household, { code: A.code, name: "Biscuit" });
+  assert.deepEqual(st.json.household, { code: A.code, name: "Biscuit", owner: false, demo: false });
   let r = await app.call("GET", "/j/biscuit-zzzz");
   assert.equal(r.status, 302); assert.equal(r.location, "/?join=unknown");
   r = await app.call("GET", "/j/biscuit-yyyy");

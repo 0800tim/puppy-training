@@ -387,4 +387,24 @@ void with a 15-minute undo). The split itself is designed in
   routes is the same whether or not the address is known, and link requests
   are capped at three an hour per visitor address and per email address.
   Grown-ups' rows gain an optional `email` (kids' rows never carry one, and
-  kids' phones do not receive them). The owner page is step 4.
+  kids' phones do not receive them).
+- Step 4 is on `feat/households-owner`: `OWNER_EMAILS` names the operator;
+  asking for a sign-in link with one of those addresses adds an owner link
+  to the email, which sets a signed `pt_owner` cookie (seven days) and opens
+  `public/owner.html` (plain HTML plus `owner.js`, outside the app shell).
+  `GET /api/owner/households` lists id, code, name, owner, dates, flags,
+  people count and whether Settings exist, never chart data; `POST` makes a
+  family (an invite: join link, plus a sign-in link when an email is given);
+  `PUT /api/owner/households/<id>` sets `suspended` or `sms`, clears a
+  pending delete with `wipe: false`, or mints a fresh sign-in link with
+  `signin: true` for a family not yet set up; `DELETE` sets
+  `flags.wipeAt` seven days out. `DELETE /api/household` does the same from
+  the app for the grown-up whose email is the family's owner (or any grown-up
+  of the carried-over family, which has none). A family with `wipeAt` answers
+  403 "being deleted" on every route but logout; `H.suspended` covers both
+  flags. `sweep()` runs at boot and every ten minutes: it removes the folder
+  and index row of families past `wipeAt` and of demo families older than a
+  day. `POST /api/demo` makes a household flagged `demo` (puppy Biscuit, a
+  grown-up Sam and a kid Alex, random PIN, no notifier, SMS off) and signs
+  the phone in as Sam; three an hour per visitor address. The state's
+  `household` carries `owner` (may this person delete it) and `demo`.

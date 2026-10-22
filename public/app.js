@@ -359,7 +359,13 @@ function renderWelcome() {
     el("div", { class: "row" }, [
       el("button", { class: "btn", type: "button", text: "I have a family code", onclick: () => renderJoin("") }),
       el("button", { class: "btn ghost", type: "button", text: "Start a new family", onclick: renderStart })]),
-    el("button", { class: "linkbtn", type: "button", text: "Grown-up on a new phone? Sign in by email", onclick: () => renderEmail("") })])));
+    el("button", { class: "linkbtn", type: "button", text: "Grown-up on a new phone? Sign in by email", onclick: () => renderEmail("") }),
+    el("button", { class: "linkbtn", type: "button", text: "Just looking? Try it with a sample family", onclick: async (e) => {
+      e.target.disabled = true; e.target.textContent = "Setting up a sample family…";
+      const r = await api("POST", "api/demo", {});
+      if (!r.ok) { e.target.disabled = false; e.target.textContent = "Just looking? Try it with a sample family"; toast((r.json && r.json.error) || "Couldn't make one. Try again."); return; }
+      boot2();
+    } })])));
   show("pin");
 }
 function renderJoin(msg) {
@@ -454,6 +460,7 @@ function renderCheckEmail(email) {
 function renderFamilyCard() {
   const h = S.household, url = location.origin + "/j/" + h.code;
   const card = el("div", { class: "card", style: "display:grid;gap:10px" });
+  if (h.demo) card.append(el("p", { class: "note", text: "This is a sample family to look around in. It is wiped a day after it was made, along with anything logged in it. Start a real family from the welcome screen when you are ready." }));
   card.append(el("p", { class: "note", text: "Every phone in the family opens this link once, then enters the family PIN. Send it to the kids' phones and to anyone else who trains " + pupName() + "." }),
     el("div", { class: "famcode" }, [el("small", { text: "Family code" }), el("b", { text: h.code })]),
     el("input", { type: "text", readonly: true, value: url, "aria-label": "Join link", onclick: (e) => e.target.select() }),
@@ -481,6 +488,12 @@ function renderFamilyCard() {
       el("button", { class: "btn ghost", type: "button", text: S.adultPin ? "Change" : "Turn on", onclick: () => changeAdult(false) }),
       S.adultPin ? el("button", { class: "btn ghost", type: "button", text: "Turn off", onclick: () => { if (confirm("Turn the grown-up PIN off? Anyone with the family PIN could then act as a grown-up.")) changeAdult(true); } }) : null])]),
     el("p", { class: "note", text: "The grown-up PIN is asked for when someone picks a grown-up's name on a phone, so kids can't act as grown-ups." }));
+  if (h.owner && !h.demo) card.append(el("div", { class: "row", style: "margin-top:6px" }, [el("button", { class: "btn ghost", type: "button", text: "Delete this family", onclick: async () => {
+    if (!confirm("Delete " + pupName() + "'s puppy school? Every phone is signed out now and the chart is gone for good after 7 days. Whoever runs the server can undo it before then.")) return;
+    const r = await api("DELETE", "api/household");
+    if (!r.ok) { toast((r.json && r.json.error) || "Couldn't delete it"); return; }
+    alert("Done. It is gone for good in " + ((r.json && r.json.days) || 7) + " days."); location.reload();
+  } })]));
   return card;
 }
 

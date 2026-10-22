@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Puppy School HQ: owner</title>
+<style>
+body{margin:0;background:#f4f3fa;color:#1c1a33;font:16px/1.5 system-ui,-apple-system,'Segoe UI',sans-serif}
+main{max-width:960px;margin:0 auto;padding:24px 16px 60px}
+h1{font-size:1.5rem;margin:0 0 4px}h2{font-size:1.05rem;margin:28px 0 8px;color:#5b4bf0;text-transform:uppercase;letter-spacing:.06em}
+p,small{color:#4a476a}
+table{width:100%;border-collapse:collapse;background:#fff;border-radius:14px;overflow:hidden;font-size:.95rem}
+th,td{text-align:left;padding:9px 10px;border-bottom:1px solid #e3e1ee;vertical-align:top}th{font-size:.8rem;text-transform:uppercase;letter-spacing:.05em;color:#6e6b8a}
+tr.off td{opacity:.6}
+button{background:#5b4bf0;color:#fff;border:0;border-radius:10px;padding:7px 12px;font:inherit;font-weight:700;cursor:pointer;margin:2px 4px 2px 0}
+button.ghost{background:#fff;color:#5b4bf0;border:1.5px solid #c9c4f5}
+button.danger{background:#fff;color:#b3261e;border:1.5px solid #e8b4b0}
+form{display:grid;gap:8px;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));background:#fff;border-radius:14px;padding:14px}
+form label{display:grid;gap:4px;font-size:.85rem;font-weight:700;color:#4a476a}
+input{font:inherit;padding:8px 10px;border:1.5px solid #d9d6ea;border-radius:10px;min-width:0}
+form .full{grid-column:1/-1}
+.links{background:#eef0ff;border-radius:14px;padding:12px 14px;margin-top:12px;word-break:break-all}
+.links code{display:block;margin:4px 0 8px;font-size:.9rem}
+.msg{color:#b3261e;min-height:1.3em}
+#signedout{display:none}
+.hidden{display:none}
+@media(prefers-color-scheme:dark){body{background:#131225;color:#ededf7}table,form,button.ghost,button.danger{background:#1d1b33}th,td{border-color:rgba(255,255,255,.08)}p,small,form label{color:#c9c6e4}input{background:#131225;color:#ededf7;border-color:#3a3760}.links{background:#232048}}
+</style>
+</head>
+<body>
+<main>
+<h1>Puppy School HQ: owner</h1>
+<p>Families on this server. Names, codes and counts only: no chart is ever shown here.</p>
+<div id="signedout"><p>You are not signed in. Ask for a sign-in link in the app with an owner address, and open it on this phone.</p><p><a href="/">Open the app</a></p></div>
+<div id="page" class="hidden">
+<h2>Families</h2>
+<div id="list"></div>
+<h2>Add a family (an invite)</h2>
+<form id="make">
+<label>Puppy's name <input name="name" maxlength="24" required></label>
+<label>Family PIN <input name="pin" inputmode="numeric" pattern="[0-9]{4,8}" maxlength="8" required></label>
+<label>Grown-up PIN (optional) <input name="adultPin" inputmode="numeric" pattern="[0-9]{4,8}" maxlength="8"></label>
+<label>Grown-up's email (optional) <input name="owner" type="email" maxlength="120"></label>
+<div class="full"><button type="submit">Make the family</button> <span class="msg" id="makemsg"></span></div>
+</form>
+<div id="made" class="links hidden"></div>
+<p><small>With an email, the grown-up gets a sign-in link you send them yourself (it works once, for 15 minutes; make another from the table if it lapses). Everyone else gets the join link and the family PIN.</small></p>
+<p style="margin-top:28px"><button class="ghost" id="out">Sign out of the owner page</button></p>
+</div>
+</main>
+<script src="/owner.js"></script>
+</body>
+</html>
