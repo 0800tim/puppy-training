@@ -155,6 +155,7 @@ class ServerStore {
     this.cb = cb;
     const r = await api("GET", "api/state");
     if (r.status === 401) return r.json && r.json.code === "household" ? "household" : "pin"; // no family on this phone yet, or no PIN
+    if (r.status === 403 && r.json && r.json.error) return { stopped: r.json.error }; // the family is paused or being deleted: the server says why
     if (!r.ok) throw new Error("server");
     if (r.json && r.json.settings && !r.json.me && meId && r.json.settings.family.some((p) => p.id === meId)) {
       const p = r.json.settings.family.find((x) => x.id === meId);
@@ -170,7 +171,7 @@ class ServerStore {
   async refresh() {
     if (document.hidden) return;
     const r = await api("GET", "api/state?since=" + this.rev);
-    if (r.status === 401) { location.reload(); return; }
+    if (r.status === 401 || r.status === 403) { location.reload(); return; } // signed out, or the family was paused or deleted meanwhile: the fresh load says so
     if (r.ok && r.json && !r.json.unchanged) this.apply(r.json);
   }
   async login(pin) { return api("POST", "api/login", { pin }); }
@@ -304,9 +305,13 @@ function renderHeader() {
 }
 
 /* ---------- PIN screen ---------- */
+let pinKeys = null;
 function renderPin() {
   const P = $("#p-pin"); P.replaceChildren();
   let pin = "";
+  // a link from an email that failed sends the phone here with ?link=; say so on this screen too (the welcome screen does the same for phones with no family)
+  const link = new URLSearchParams(location.search).get("link");
+  if (link) history.replaceState(null, "", location.pathname + location.hash);
   const dots = el("div", { class: "pin-dots", "aria-hidden": "true" });
   const msg = el("div", { class: "pin-msg", role: "alert" });
   const draw = () => { dots.replaceChildren(...[...Array(Math.max(4, pin.length))].map((_, i) => el("i", { class: i < pin.length ? "on" : "" }))); };
@@ -330,7 +335,10 @@ function renderPin() {
   ["1", "2", "3", "4", "5", "6", "7", "8", "9", "del", "0", "go"].forEach((k) =>
     pad.append(el("button", { class: k === "del" || k === "go" ? "alt" : "", "aria-label": k === "del" ? "Delete" : k === "go" ? "Unlock" : k, onclick: () => press(k), text: k === "del" ? "⌫ Delete" : k === "go" ? "Unlock →" : k })));
   const box = el("div", { class: "pin" }, [el("h2", { class: "h2", text: "Enter the family PIN" }), dots, msg, pad]);
-  document.addEventListener("keydown", (e) => { if ($("#p-pin").hidden) return; if (/^\d$/.test(e.key)) press(e.key); else if (e.key === "Backspace") press("del"); else if (e.key === "Enter") press("go"); });
+  if (link) msg.textContent = link === "used" ? "That link has already been used. Ask for a new one, or use the PIN." : "That link has stopped working. Links from emails work once, for 15 minutes. Ask for a new one, or use the PIN.";
+  if (pinKeys) document.removeEventListener("keydown", pinKeys); // drawn again (welcome, email, back): one listener, or a wrong PIN typed on a keyboard would count twice
+  pinKeys = (e) => { if ($("#p-pin").hidden || !box.isConnected) return; if (/^\d$/.test(e.key)) press(e.key); else if (e.key === "Backspace") press("del"); else if (e.key === "Enter") press("go"); };
+  document.addEventListener("keydown", pinKeys);
   draw();
   P.append(el("div", { class: "pin-wrap" }, box));
   show("pin");
@@ -339,7 +347,7 @@ function renderPin() {
     if (!r.ok || !r.json || !r.json.households || !r.json.code) return;
     box.prepend(el("div", { class: "pin-fam" }, [el("b", { text: r.json.name ? r.json.name + "'s puppy school" : "Your family's puppy school" }), el("small", { text: "Family code " + r.json.code })]));
     box.append(el("button", { class: "linkbtn", type: "button", text: "Not your family? Use another code", onclick: () => renderJoin("") }));
-    if (r.json.signup) box.append(el("button", { class: "linkbtn", type: "button", text: "Grown-up on a new phone? Sign in by email", onclick: () => renderEmail("") }));
+    if (r.json.signup) box.append(el("button", { class: "linkbtn", type: "button", text: "Grown-up on a new phone? Sign in by email", onclick: () => renderEmail("", renderPin) }));
   });
 }
 
@@ -424,7 +432,8 @@ async function renderStart() {
     el("div", { class: "row" }, [btn, el("button", { class: "btn ghost", type: "button", text: "Back", onclick: renderWelcome })])])));
   show("pin"); name.focus();
 }
-function renderEmail(msgText) {
+function renderEmail(msgText, back) {
+  back = back || renderWelcome; // a phone that already has a family came from its PIN screen and goes back there
   const P = $("#p-pin"); P.replaceChildren();
   const email = el("input", { type: "email", maxlength: "120", autocomplete: "email", autocapitalize: "none", placeholder: "you@example.nz", "aria-label": "Your email" });
   const msg = el("div", { class: "pin-msg", role: "alert", text: msgText || "" });
@@ -434,7 +443,7 @@ function renderEmail(msgText) {
     const r = await store.emailLink(email.value.trim());
     btn.disabled = false;
     if (!r.ok) { msg.textContent = (r.json && r.json.error) || "Couldn't send it. Try again."; return; }
-    renderCheckEmail(email.value.trim());
+    renderCheckEmail(email.value.trim(), back);
   };
   const btn = el("button", { class: "btn", type: "button", text: "Email me a link", onclick: go });
   email.addEventListener("keydown", (e) => { if (e.key === "Enter") go(); });
@@ -443,16 +452,28 @@ function renderEmail(msgText) {
     el("h2", { class: "h2", text: "Sign in by email" }),
     el("p", { class: "note", text: "The email you gave when the family was set up, or the one on your row in Settings. Kids use the family PIN instead." }),
     el("div", { class: "field" }, [el("label", { text: "Your email" }), email]), msg,
-    el("div", { class: "row" }, [btn, el("button", { class: "btn ghost", type: "button", text: "Back", onclick: renderWelcome })])])));
+    el("div", { class: "row" }, [btn, el("button", { class: "btn ghost", type: "button", text: "Back", onclick: () => back() })])])));
   show("pin"); email.focus();
 }
-function renderCheckEmail(email) {
+function renderCheckEmail(email, back) {
   const P = $("#p-pin"); P.replaceChildren();
   P.append(el("div", { class: "pin-wrap" }, el("div", { class: "card welcome" }, [
     el("div", { class: "eyebrow", text: "Check your email" }),
     el("h2", { class: "h2", text: "We sent a link to " + email }),
     el("p", { class: "note", text: "Open it on this phone within 15 minutes. If nothing arrives, check the junk folder, then ask for another." }),
-    el("div", { class: "row" }, [el("button", { class: "btn ghost", type: "button", text: "Send again", onclick: () => renderEmail("") }), el("button", { class: "btn ghost", type: "button", text: "Use the family PIN instead", onclick: () => api("GET", "api/household").then((r) => (r.ok && r.json && r.json.code ? renderPin() : renderJoin(""))) })])])));
+    el("div", { class: "row" }, [el("button", { class: "btn ghost", type: "button", text: "Send again", onclick: () => renderEmail("", back) }), el("button", { class: "btn ghost", type: "button", text: "Use the family PIN instead", onclick: () => api("GET", "api/household").then((r) => (r.ok && r.json && r.json.code ? renderPin() : renderJoin(""))) })])])));
+  show("pin");
+}
+
+function renderStopped(why) {
+  const P = $("#p-pin"); P.replaceChildren();
+  P.append(el("div", { class: "pin-wrap" }, el("div", { class: "card welcome" }, [
+    el("div", { class: "eyebrow", text: "Puppy School HQ" }),
+    el("h2", { class: "h2", text: "This school is closed for now" }),
+    el("p", { class: "note", text: why }),
+    el("div", { class: "row" }, [
+      el("button", { class: "btn ghost", type: "button", text: "Try again", onclick: () => location.reload() }),
+      el("button", { class: "btn ghost", type: "button", text: "Use another family on this phone", onclick: async () => { await api("POST", "api/logout"); renderJoin(""); } })])])));
   show("pin");
 }
 
@@ -1584,7 +1605,7 @@ function onState() {
 async function boot2() {
   try {
     const r = await store.init(onState);
-    if (r === "pin") renderPin(); else if (r === "household") renderWelcome();
+    if (r === "pin") renderPin(); else if (r === "household") renderWelcome(); else if (r && r.stopped) renderStopped(r.stopped);
   } catch (e) {
     console.error(e);
     const net = !e || e.message === "server" || /fetch/i.test(String(e.message));
