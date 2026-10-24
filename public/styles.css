@@ -529,6 +529,9 @@ button.vid{width:100%;border:1px solid var(--line);font:inherit;text-align:left;
 .pin-fam b{font-family:var(--font-display);font-size:1.1rem}
 .pin-fam small{color:var(--muted)}
 .linkbtn{background:none;border:0;color:var(--accent);font:inherit;font-weight:700;cursor:pointer;text-decoration:underline;padding:6px;min-height:44px}
+.qr{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.qr svg{width:164px;height:164px;border-radius:12px;display:block}
+.qr small{flex:1;min-width:120px}
 .famcode{display:grid;gap:2px}
 .famcode small{color:var(--muted);font-size:.8rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase}
 .famcode b{font-family:var(--font-display);font-size:1.7rem;letter-spacing:.02em;user-select:all}

@@ -1,8 +1,8 @@
 /* Service worker: caches the app shell so it opens instantly and works offline.
    The family chart (api/*) always goes to the network. Bump VERSION when shipping changes. */
-const VERSION = "pt-v24";
+const VERSION = "pt-v25";
 const V = VERSION.replace("pt-v", "");
-const SHELL = ["./", "index.html", "styles.css?v=" + V, "content.js?v=" + V, "rewards.js?v=" + V, "theme.js?v=" + V, "app.js?v=" + V, "manifest.webmanifest", "icon.svg", "icon-192.png", "icon-512.png", "apple-touch-icon.png"];
+const SHELL = ["./", "index.html", "styles.css?v=" + V, "content.js?v=" + V, "rewards.js?v=" + V, "qr.js?v=" + V, "theme.js?v=" + V, "app.js?v=" + V, "manifest.webmanifest", "icon.svg", "icon-192.png", "icon-512.png", "apple-touch-icon.png"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));

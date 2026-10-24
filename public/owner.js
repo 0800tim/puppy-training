@@ -58,7 +58,7 @@
     e.target.reset();
     const L = r.json.links;
     $("#made").classList.remove("hidden");
-    $("#made").innerHTML = "<b>" + esc(body.name) + "'s family is ready.</b> Family code <code>" + esc(r.json.code) + "</code>Join link (every phone opens it once, then the family PIN):<code>" + esc(L.join) + "</code>" + (L.signin ? "Sign-in link for the grown-up (send it to them; once, 15 minutes):<code>" + esc(L.signin) + "</code>" : "");
+    $("#made").innerHTML = "<b>" + esc(body.name) + "'s family is ready.</b> Family code <code>" + esc(r.json.code) + "</code>Join link (every phone opens it once, then the family PIN):<code>" + esc(L.join) + "</code>" + (typeof PUPPY_QR !== "undefined" ? PUPPY_QR.svg(L.join, { label: "QR code for the join link" }) : "") + (L.signin ? "Sign-in link for the grown-up (send it to them; once, 15 minutes):<code>" + esc(L.signin) + "</code>" : "");
     draw(r.json.households);
   });
   $("#out").addEventListener("click", async () => { await api("POST", "/api/owner/logout"); location.reload(); });

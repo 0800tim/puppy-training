@@ -488,6 +488,8 @@ function renderFamilyCard() {
     el("div", { class: "row" }, [el("button", { class: "btn", type: "button", text: navigator.share ? "Share join link" : "Copy join link", onclick: async () => {
       try { if (navigator.share) await navigator.share({ title: "Join " + pupName() + "'s puppy school", url }); else { await navigator.clipboard.writeText(url); toast("Copied"); } } catch (e) {}
     } })]));
+  // the same link as a QR code: a phone in the same room points its camera at this one and lands on the PIN screen
+  if (typeof PUPPY_QR !== "undefined") { try { card.append(el("div", { class: "qr" }, [el("div", { html: PUPPY_QR.svg(url, { label: "QR code for the join link" }) }), el("small", { class: "note", text: "Or point the other phone's camera at this." })])); } catch (e) { console.error(e); } }
   const digits = (v) => /^\d{4,8}$/.test(v);
   const pinIn = el("input", { type: "password", inputmode: "numeric", pattern: "[0-9]*", autocomplete: "off", placeholder: "4 to 8 digits", "aria-label": "New family PIN", maxlength: "8" });
   const adultIn = el("input", { type: "password", inputmode: "numeric", pattern: "[0-9]*", autocomplete: "off", placeholder: "4 to 8 digits", "aria-label": "New grown-up PIN", maxlength: "8" });
