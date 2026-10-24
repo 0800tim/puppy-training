@@ -1,0 +1,7 @@
+# User unit: rotates the slot logs with deploy/logrotate.conf. Run by the timer, never enabled on its own.
+[Unit]
+Description=Puppy School HQ log rotation
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/logrotate -s %h/.local/state/puppy-training-logrotate.state %h/.config/puppy-training/logrotate.conf

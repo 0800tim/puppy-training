@@ -1,0 +1,10 @@
+[Unit]
+Description=Puppy School HQ log rotation, weekly, Monday 04:10 NZ time
+
+[Timer]
+OnCalendar=Mon *-*-* 04:10:00 Pacific/Auckland
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

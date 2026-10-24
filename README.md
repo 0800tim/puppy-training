@@ -109,7 +109,7 @@ echo "PUPPY_PIN=482913" > .env
 docker compose up -d --build    # listens on 127.0.0.1:8080
 ```
 
-Then put HTTPS in front of it (Caddy, nginx, a Cloudflare Tunnel or Tailscale Funnel). See [`deploy/`](deploy/) for a systemd unit, env file and Caddyfile.
+Then put HTTPS in front of it (Caddy, nginx, a Cloudflare Tunnel or Tailscale Funnel). See [`deploy/`](deploy/) for a systemd unit, env file, Caddyfile, and a logrotate config with a weekly user timer for a setup that appends the unit's output to a file (the login lines carry addresses, so keep them short-lived).
 
 #### Settings
 

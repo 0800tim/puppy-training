@@ -126,7 +126,11 @@ of its last wrong guess. It is not backed up and is safe to delete.
 ## What the server writes to its log
 
 `~/logs/puppy-training/{prod,demo,app}.log`, one file per slot, appended
-by systemd, never rotated. There is no access log: a request is only logged
+by systemd. Since 24 October 2026 `deploy/logrotate.conf` with its user
+timer (`ops/logrotate`) rotates them weekly, four copies deep and
+compressed, so an address is out of the logs after five weeks at most, and
+makes every copy owner-only; it waits for Tim to turn the timer on. There
+is no access log: a request is only logged
 when one of these happens:
 
 | Line | Contains |
@@ -156,7 +160,7 @@ The backup log holds one line per run with a file count.
 | Daily local backups of `store.json` | 30 days, in `/srv/backups/puppy-training` (mode 664 today; should be 600) |
 | The photo in backups | Overwritten daily, so the last one only |
 | `secret.key` and `vapid.json` in backups | Indefinitely |
-| Server logs, with IPs | Forever, no rotation |
+| Server logs, with IPs | Five weeks at most once the rotation timer is on (`deploy/logrotate.conf`: weekly, four copies); forever until then |
 | Offsite bundles (planned) | 14 daily plus 6 monthly, encrypted |
 | Cookies on a phone | 180 days, or until the PIN changes or "Lock this phone" |
 
