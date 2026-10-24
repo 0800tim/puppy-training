@@ -324,5 +324,10 @@
     };
   }
 
-  return { compute, skillStatus, missions, course, levelOf, iso, monday, addDays };
+  /* Did the session just logged finish this lesson? Only when the person's own count crossed
+     the reps line. A lesson the pack already mastered is "done" with a count of zero, so a
+     revision session on it is a session, not a graduation. */
+  function lessonFinished(was, L) { return !!L && was < L.reps && L.count >= L.reps; }
+
+  return { compute, skillStatus, missions, course, levelOf, iso, monday, addDays, lessonFinished };
 });

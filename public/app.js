@@ -89,7 +89,7 @@ async function setMe(id) {
     if (!r.ok) { toast((r.json && r.json.error) || "Couldn't switch"); return false; }
     store.apply(r.json);
   }
-  meId = id; lsSet("pt.me", id); return true;
+  meId = id; lsSet("pt.me", id); adoptWatched(); return true;
 }
 
 /* ---------- theme ---------- */
@@ -147,7 +147,7 @@ class ServerStore {
     S.settings = j.settings || null;
     S.ticks = j.ticks || {}; S.logs = j.logs || {}; S.mastery = j.mastery || {}; S.toilet = j.toilet || [];
     S.push = j.push || []; S.sms = !!j.sms; S.vapid = j.vapid || ""; S.social = j.social || {}; S.adultPin = !!j.adultPin; S.share = j.share || null; S.health = j.health || []; S.teach = j.teach || []; S.removals = j.removals || []; S.household = j.household || null; S.starter = j.starter || null;
-    if ("me" in j) { S.me = j.me; if (j.me && j.me !== meId) { meId = j.me; lsSet("pt.me", j.me); } }
+    if ("me" in j) { S.me = j.me; if (j.me && j.me !== meId) { meId = j.me; lsSet("pt.me", j.me); adoptWatched(); } }
     if (j.photo !== S.photo) { S.photo = !!j.photo; this.photoBust = Date.now(); }
     this.cb();
   }
@@ -1195,6 +1195,13 @@ function lessonLabel(id) { const li = Math.max(0, C.course.levels.findIndex((l) 
 const watchedKey = () => "pt.watched." + (meId || "anon");
 const watched = (id) => (lsGet(watchedKey(), []) || []).includes(id);
 function markWatched(id) { const w = lsGet(watchedKey(), []) || []; if (!w.includes(id)) { w.push(id); lsSet(watchedKey(), w); } }
+/* videos watched on this phone before anyone was picked belong to whoever picks themselves next */
+function adoptWatched() {
+  if (!meId) return;
+  const a = lsGet("pt.watched.anon", null); if (!Array.isArray(a) || !a.length) return;
+  const w = lsGet(watchedKey(), []) || []; a.forEach((id) => { if (!w.includes(id)) w.push(id); }); lsSet(watchedKey(), w);
+  try { localStorage.removeItem("pt.watched.anon"); } catch (e) {}
+}
 const thumbUrl = (id) => "https://i.ytimg.com/vi/" + id + "/mqdefault.jpg";
 const thumb = (vid, cls) => el("span", { class: "thumb " + (cls || ""), "aria-hidden": "true" }, [el("img", { src: thumbUrl(vid), alt: "", loading: "lazy" }), el("span", { class: "play" })]);
 function heroVideo(id, onPlay) {
@@ -1234,7 +1241,7 @@ async function logSession(sk) {
   if (!ok) return false;
   buzz([20, 30, 20]);
   const after = courseOf(m.id); const L = after && after.lessons[sk.id];
-  if (L && L.done && was < L.reps) {
+  if (R.lessonFinished(was, L)) {
     const next = after.current && skillById(after.current);
     celebrate("Lesson done: " + T(sk.nm), next ? "Next up: " + T(next.nm) + ". " + pupName() + " is getting the idea too." : "That was the last lesson. " + pupName() + " has a graduate.", "🎓");
   } else toast("+" + C.points.session + " · " + (L ? L.count + " of " + L.reps + " for this lesson" : "logged") + " · " + slot.t.toLowerCase() + " slot");
@@ -1249,11 +1256,14 @@ function sessionTimer(sk, host, onDone) {
   const dots = el("div", { class: "t-dots", "aria-hidden": "true" }, phases.map(() => el("i")));
   const fmtT = (x) => Math.floor(x / 60) + ":" + pad(x % 60);
   const draw = () => { big.textContent = fmtT(st.left); ph.textContent = st.i === 1 ? T(sk.nm) : phases[st.i][0]; hint.textContent = T(phases[st.i][2]); dots.querySelectorAll("i").forEach((x, i) => x.classList.toggle("on", i <= st.i)); };
-  const stop = () => { clearInterval(st.iv); timer = null; try { if (st.lock) st.lock.release(); } catch (e) {} };
+  // the browser drops a screen wake lock whenever the page is hidden, so ask again each time it comes back while this session runs
+  const lock = () => { try { if (navigator.wakeLock && !document.hidden) navigator.wakeLock.request("screen").then((l) => { if (timer === st) st.lock = l; else l.release(); }).catch(() => {}); } catch (e) {} };
+  const onVis = () => { if (!document.hidden) lock(); };
+  document.addEventListener("visibilitychange", onVis);
+  const stop = () => { clearInterval(st.iv); timer = null; document.removeEventListener("visibilitychange", onVis); try { if (st.lock) st.lock.release(); } catch (e) {} };
   const next = () => { if (st.i >= phases.length - 1) { stop(); onDone(); return; } st.i++; st.left = phases[st.i][1]; buzz([40, 60, 40]); draw(); };
   st.iv = setInterval(() => { if (st.paused) return; st.left--; if (st.left <= 0) next(); else draw(); }, 1000);
-  try { if (navigator.wakeLock) navigator.wakeLock.request("screen").then((l) => (st.lock = l)).catch(() => {}); } catch (e) {}
-  timer = st;
+  timer = st; lock();
   const pause = el("button", { class: "btn ghost", type: "button", text: "Pause", onclick: () => { st.paused = !st.paused; pause.textContent = st.paused ? "Resume" : "Pause"; } });
   host.replaceChildren(el("div", { class: "card timer", role: "timer", "aria-live": "off" }, [dots, ph, big, hint,
     el("div", { class: "row", style: "justify-content:center" }, [pause, el("button", { class: "btn ghost", type: "button", text: "Next part", onclick: next }), el("button", { class: "btn", type: "button", text: "Finish and tick it off", onclick: () => { stop(); onDone(); } })]),

@@ -197,3 +197,24 @@ test("regression: the puppy's age in weeks does not lose a week across daylight 
   const S3 = R.compute(fresh({}), C, { today: "2026-10-23" });
   assert.equal(S3.toilet.ageWeeks, 10);
 });
+
+test("a session on a lesson the pack already mastered is a session, not a graduation", () => {
+  const mastery = { sit: { done: [{ by: "a", witness: "m", at: 1 }, { by: "m", witness: "a", at: 2 }, { by: "b", witness: "a", at: 3 }] } };
+  const before = R.compute({ settings, ticks: {}, logs: {}, mastery, toilet: [] }, C, { today: "2026-10-16" });
+  const was = before.course.people.m.lessons.sit.count;
+  assert.equal(was, 0); assert.equal(before.course.people.m.lessons.sit.done, true, "mastered: done with no sessions");
+  const after = R.compute({ settings, ticks: { "2026-10-16_m_am": { at: 1, by: "m", skill: "sit" } }, logs: {}, mastery, toilet: [] }, C, { today: "2026-10-16" });
+  const L = after.course.people.m.lessons.sit;
+  assert.equal(L.count, 1); assert.equal(L.done, true);
+  assert.equal(R.lessonFinished(was, L), false, "the old check (done and was < reps) would have celebrated Lesson done here");
+  // the ordinary path: the third session of a lesson finishes it, the fourth does not finish it again
+  const ticks = {}; ["2026-10-14_a_am", "2026-10-14_a_pm"].forEach((k) => { ticks[k] = { at: 1, by: "a", skill: "name" }; });
+  const two = R.compute({ settings, ticks, logs: {}, mastery: {}, toilet: [] }, C, { today: "2026-10-16" }).course.people.a.lessons.name;
+  ticks["2026-10-15_a_am"] = { at: 1, by: "a", skill: "name" };
+  const three = R.compute({ settings, ticks, logs: {}, mastery: {}, toilet: [] }, C, { today: "2026-10-16" }).course.people.a.lessons.name;
+  assert.equal(R.lessonFinished(two.count, three), true);
+  ticks["2026-10-15_a_pm"] = { at: 1, by: "a", skill: "name" };
+  const four = R.compute({ settings, ticks, logs: {}, mastery: {}, toilet: [] }, C, { today: "2026-10-16" }).course.people.a.lessons.name;
+  assert.equal(R.lessonFinished(three.count, four), false, "count is capped at reps, so a revision session does not cross again");
+  assert.equal(R.lessonFinished(0, null), false);
+});
