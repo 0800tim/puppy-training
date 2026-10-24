@@ -18,7 +18,8 @@ public/            the whole app, plain HTML, CSS and JS, no build step
   rewards.js       the rewards engine: points, streaks, buddy streaks, levels, badges,
                    missions, challenges, skill tree, teaching
   qr.js            a QR encoder for the join link (byte mode, level M, versions 1 to
-                   10), drawn as an inline SVG; checked against python-qrcode in tests
+                   10), drawn as an inline SVG; checked against python-qrcode in tests,
+                   and its SVG read back by zxing-cpp (scripts/qr-decode-check.py)
   app.js           UI, stores, identity, cropper, player, exports, certificate
   sw.js            service worker: offline shell, push and notification click
 server/
@@ -370,7 +371,10 @@ void with a 15-minute undo). The split itself is designed in
   Copy, change the family PIN, turn the grown-up PIN on, off or change it).
   The card also shows the join link as a QR code (`qr.js`, added 24 October on
   `feat/join-qr`), and the owner page shows one under a newly made family's
-  join link, so a phone in the same room joins by camera.
+  join link, so a phone in the same room joins by camera. The tests prove the
+  module grid matches python-qrcode; `scripts/qr-decode-check.py` rasterises
+  the SVG the page draws and reads it back with zxing-cpp, every size and
+  mask, so the drawn symbol is known to decode. No real camera has read it yet.
 - Step 3 is on `feat/households-email`: `server/mail.js` (`MAIL=console`
   prints each email to the log with its link; `MAIL=sendgrid` posts to
   SendGrid's v3 mail/send with click tracking off, because a rewritten link
