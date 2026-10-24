@@ -81,15 +81,16 @@ Five branches, about three and a half days.
 
 ## Added 24 October: the branches that wait on you
 
-Six branches sit on top of main, each cut from the last, all tests green
-(84), nothing merged or deployed. Merging them is one fast-forward chain.
+Eight branches sit on top of main, each cut from the last, all tests green
+(88), nothing merged or deployed. Merging them is one fast-forward chain.
 
 | # | Question | Recommendation | Say |
 | --- | --- | --- | --- |
-| 21 | Merge, in this order: `sec/households-review`, `ui/households-client`, `feat/join-qr`, `feat/lockouts-persist`, `ops/logrotate`, `docs/households-note`, then push main (it is also four commits ahead from 22 October)? | Yes, all six; each fast-forwards onto the last. | yes or pick |
+| 21 | Merge, in this order: `sec/households-review`, `ui/households-client`, `feat/join-qr`, `feat/lockouts-persist`, `ops/logrotate`, `docs/households-note`, `ui/lesson-timer`, `ui/lesson-polish`, then push main (it is also four commits ahead from 22 October)? | Yes, all eight; each fast-forwards onto the last. | yes or pick |
 | 22 | Add `APP_URL=https://puppy.appspurt.dev` to the dev `.env` and restart `puppy-training.service`, so emailed links and QR codes carry the right host whatever header a request arrives with? | Yes; one line and a restart. | yes or no |
 | 23 | Install the log rotation timer with the four commands in the header of `deploy/logrotate.conf` (copies the config, chmod 600 on the current logs, enables a Monday 04:10 timer)? The logs are world-readable and carry addresses until then. | Yes. | yes or no |
-| 24 | A browser pass of the new screens (welcome, sign-up, sign-in, check your email, paused family, owner page) and a real phone camera on the QR code in Settings under Your family. No browser is allowed on the server, so none of this has been seen rendered. | Ten minutes on your phone against dev before anything is promoted. | done or notes |
+| 24 | A browser pass of the new screens (welcome, sign-up, sign-in, check your email, paused family, owner page, and a lesson page with the 5-minute timer running: switch apps and come back, press back, open another lesson) and a real phone camera on the QR code in Settings under Your family. No browser is allowed on the server, so none of this has been seen rendered. | Ten minutes on your phone against dev before anything is promoted. | done or notes |
+| 25 | Should "video watched" follow a person between phones? Today it is a flag in the phone's own storage, per person, so a kid who watched on the tablet sees "Watch the video first" on a parent's phone. Keeping it on the server means one more per-person record and an endpoint. | Leave it per phone until someone minds; the lesson still works without the flag. | leave or server |
 
 ## Already settled, for the record
 
