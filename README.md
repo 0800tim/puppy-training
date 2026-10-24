@@ -117,7 +117,7 @@ Then put HTTPS in front of it (Caddy, nginx, a Cloudflare Tunnel or Tailscale Fu
 |---|---|---|
 | `PUPPY_PIN` | required | 4 to 8 digits. Use 6+ if it's on the public internet. Changing it signs every phone out. |
 | `PORT` / `HOST` | `8080` / `0.0.0.0` | |
-| `DATA_DIR` | `./data` | `store.json` (the chart), `photo.jpg` and `secret.key` live here. Back it up. |
+| `DATA_DIR` | `./data` | `store.json` (the chart), `photo.jpg` and `secret.key` live here. Back it up. `lockouts.json` (recent wrong-guess times, so a restart keeps a lockout) also lives here; it rebuilds itself and needs no backup. |
 | `SESSION_DAYS` | `180` | How long a phone stays unlocked. |
 | `TRUST_PROXY` | off | Set `1` behind a reverse proxy or tunnel so rate limits and secure cookies use the real client. |
 | `PUPPY_ADULT_PIN` | unset | Optional second PIN, 4 to 8 digits. When set, picking a grown-up profile on a phone asks for it, so kids can't act as grown-ups. |

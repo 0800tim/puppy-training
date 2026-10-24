@@ -15,7 +15,7 @@ What the daily backup holds, what each file is for, and how to put a slot back. 
 
 Slots: `prod` (puppy.appspurt.com, `/srv/projects/internal/puppy-training-prod/data`), `demo` (puppy-demo.appspurt.com, `/srv/projects/internal/puppy-training-demo/data`), `dev` (puppy.appspurt.dev, `/srv/projects/internal/puppy-training/data`).
 
-Not in the backup, by design: `.env` (the PIN and gateway settings; it lives only in the slot folder with mode 600) and the code (git).
+Not in the backup, by design: `.env` (the PIN and gateway settings; it lives only in the slot folder with mode 600), `lockouts.json` (recent wrong-guess times; it rebuilds itself and holds nothing worth keeping) and the code (git).
 
 **Backups are not offsite.** They sit on the same disk as the live data. An offsite copy (the house pattern is the `clawdia-backups` R2 bucket, age-encrypted, as the other projects do) is still to be set up. Until then a disk failure loses the backups too.
 

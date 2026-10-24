@@ -349,6 +349,9 @@ void with a 15-minute undo). The split itself is designed in
   its files where they always were, PINs from the environment, and cookies
   byte-identical to before (no household field, same tag), which is why the
   existing suite passes unchanged.
+- `DATA_DIR/lockouts.json` keeps the wrong-guess times (per address, global,
+  per household) across restarts, mode 600, pruned to the live windows on
+  each write; the email link budget stays in memory.
 - With `HOUSEHOLDS=1`: `DATA_DIR/households.json` is the index (id, code,
   name, owner email, scrypt PIN hashes, tag, flags), each family lives in
   `DATA_DIR/households/<id>/`, one `secret.key` and one `vapid.json` serve

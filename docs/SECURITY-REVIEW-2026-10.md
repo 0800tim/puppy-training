@@ -32,7 +32,7 @@ Scope: the self-hosted PIN server (`server/server.js`, `server/notify.js`, `serv
 - **One shared family PIN** is the model. It is a front-door lock, not per-person auth. The grown-up PIN is the only second factor. Phase 2 (multi-family) will need real accounts for family owners.
 - **No audit trail beyond the log file.** `log()` records logins, identity picks and notification sends; the chart itself keeps `by` on every entry, which is the visible accountability the research recommended.
 - **The identity cookie is as long-lived as the session (180 days).** A lost phone that is still unlocked can act as its person until the PIN is changed. Changing the PIN remains the kill switch.
-- **Rate limiting is in memory.** A restart clears lockouts. Acceptable for one family; Phase 2 should persist it.
+- **Rate limiting was in memory** until 24 October 2026 (`feat/lockouts-persist`): the per-address, global and per-household failure times now live in `DATA_DIR/lockouts.json` (mode 600, pruned to the live windows on every write) and are read back on boot, so a deploy or a crash no longer hands a guesser a fresh budget. The email link budget (three an hour per address and per phone) stays in memory on purpose: persisting it would write addresses to one more file for a restart that nobody outside can cause.
 - **`/api/photo` is readable by anyone with the PIN**, as intended.
 - **SMS numbers are visible to every family member** in the state. Only grown-ups can change them. If that matters, strip `phone` from the state for kids in a follow-up.
 

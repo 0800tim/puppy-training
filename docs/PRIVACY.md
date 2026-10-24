@@ -114,6 +114,15 @@ the file system is the admin interface.
 No analytics, no error reporting service, no ad or tracking script. The
 Content-Security-Policy allows connections to the app's own origin only.
 
+## The lockout file
+
+`DATA_DIR/lockouts.json` (since 24 October 2026) holds the times of recent
+wrong PIN and code guesses by public IP address, plus a global list and a
+per-family list, so a restart does not reset the lockouts. It is mode 600,
+rewritten on every wrong guess and every successful login, and pruned to
+the live windows each time, so an address is gone from it within an hour
+of its last wrong guess. It is not backed up and is safe to delete.
+
 ## What the server writes to its log
 
 `~/logs/puppy-training/{prod,demo,app}.log`, one file per slot, appended

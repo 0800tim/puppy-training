@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /*
- * Puppy School HQ — tiny self-hosted server.
+ * Puppy School HQ: tiny self-hosted server.
  * Serves the app from ../public and keeps one shared family chart behind a PIN.
  * Zero dependencies. Node 18+.
  *
@@ -116,8 +116,27 @@ function createApp(opts = {}) {
   const peekHid = (tok) => { try { return JSON.parse(Buffer.from(String(tok || "").split(".")[0], "base64url").toString()).h || null; } catch { return null; } }; // unsigned peek; the signature is checked when the token is used
 
   /* ---------- brute-force protection ---------- */
+  // The counters outlive a restart: a deploy or a crash must not hand a guesser a fresh budget. DATA_DIR/lockouts.json
+  // keeps the failure times (addresses included, so mode 600), pruned to the live windows on every write, so an
+  // address leaves the file within an hour of its last wrong guess and the file cannot grow past the lockout caps.
+  const lockFile = path.join(dataDir, "lockouts.json");
   const fails = new Map(); // ip -> [timestamps]
   let globalFails = [];
+  const hFails = new Map(); // household id -> [timestamps]
+  const live = (a, w) => { const t = now(); return Array.isArray(a) ? a.filter((x) => Number.isFinite(x) && x <= t && t - x < w) : []; }; // a time in the future (clock set back) does not count
+  try {
+    const raw = JSON.parse(fs.readFileSync(lockFile, "utf8"));
+    if (raw && raw.v === 1) {
+      for (const [k, v] of Object.entries(raw.ip || {})) { const m = live(v, limits.perIpWindowMs); if (m.length) fails.set(k, m); }
+      globalFails = live(raw.global, limits.globalWindowMs);
+      for (const [k, v] of Object.entries(raw.household || {})) { const m = live(v, limits.perIpWindowMs); if (m.length) hFails.set(k, m); }
+    }
+  } catch (e) { if (e.code !== "ENOENT") log("error", "lockouts.json unreadable, starting with none: " + e.message); }
+  function saveLockouts() {
+    const keep = (m, w) => { const o = {}; for (const [k, v] of m) { const a = live(v, w); if (a.length) o[k] = a; } return o; };
+    const out = { v: 1, ip: keep(fails, limits.perIpWindowMs), global: live(globalFails, limits.globalWindowMs), household: keep(hFails, limits.perIpWindowMs) };
+    try { const tmp = lockFile + ".tmp"; fs.writeFileSync(tmp, JSON.stringify(out), { mode: 0o600 }); fs.renameSync(tmp, lockFile); } catch (e) { log("error", "lockouts.json not written: " + e.message); }
+  }
   function lockedFor(ip) {
     const t = now();
     const mine = (fails.get(ip) || []).filter((x) => t - x < limits.perIpWindowMs);
@@ -127,10 +146,9 @@ function createApp(opts = {}) {
     if (globalFails.length >= limits.global) return Math.ceil((globalFails[0] + limits.globalWindowMs - t) / 1000);
     return 0;
   }
-  function recordFail(ip, hid) { const t = now(); fails.set(ip, [...(fails.get(ip) || []), t]); globalFails.push(t); if (hid) hFails.set(hid, [...(hFails.get(hid) || []), t]); }
+  function recordFail(ip, hid) { const t = now(); fails.set(ip, [...(fails.get(ip) || []), t]); globalFails.push(t); if (hid) hFails.set(hid, [...(hFails.get(hid) || []), t]); saveLockouts(); }
   // A stranger who has a family's code must not be able to grind that family's PIN from many addresses, and one
   // family's typos must not lock every family on the server: a second counter, per household.
-  const hFails = new Map();
   function lockedHousehold(hid) {
     const t = now();
     const mine = (hFails.get(hid) || []).filter((x) => t - x < limits.perIpWindowMs);
@@ -700,7 +718,7 @@ function createApp(opts = {}) {
       if (wait > 0) { log("login locked", ip, ...hid); return send(res, 429, { error: "Too many tries", retryAfter: wait }, { "Retry-After": String(wait) }); }
       const body = await readJson(req);
       if (!H.pinMatches(body.pin ?? "")) { recordFail(ip, H.id); log("login failed", ip, ...hid); return send(res, 401, { error: "Wrong PIN" }); }
-      fails.delete(ip); hFails.delete(H.id);
+      fails.delete(ip); hFails.delete(H.id); saveLockouts();
       H.touch();
       log("login ok", ...hid);
       const cookie = "pt_session=" + makeToken() + "; Path=/; HttpOnly; SameSite=Strict; Max-Age=" + Math.floor(sessionDays * 86400) + (isHttps(req) ? "; Secure" : "");
