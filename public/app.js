@@ -1244,7 +1244,7 @@ async function logSession(sk) {
 let timer = null;
 function sessionTimer(sk, host, onDone) {
   const phases = C.course.session;
-  const st = { i: 0, left: phases[0][1], paused: false, iv: null, lock: null };
+  const st = { sk: sk.id, i: 0, left: phases[0][1], paused: false, iv: null, lock: null };
   const big = el("div", { class: "t-time" }), ph = el("div", { class: "t-phase" }), hint = el("p", { class: "t-hint" });
   const dots = el("div", { class: "t-dots", "aria-hidden": "true" }, phases.map(() => el("i")));
   const fmtT = (x) => Math.floor(x / 60) + ":" + pad(x % 60);
@@ -1291,7 +1291,10 @@ function masteryCard(s, st, m) {
 }
 function renderLesson(id, push) {
   const sk = skillById(id); if (!sk) { show("skills"); return; }
-  if (timer) return; // a session is running on this screen; leave it alone
+  if (timer) { // a session is running and its screen still holds the timer: go back to it rather than redraw over it
+    if (timer.sk !== id) toast("A " + T(skillById(timer.sk).nm) + " session is running. Finish or stop it first.");
+    lessonId = timer.sk; show("lesson", push); return;
+  }
   lessonId = id;
   const P = $("#p-lesson"); P.replaceChildren();
   const m = me(); const co = m && courseOf(m.id); const L = co ? co.lessons[id] : null;
