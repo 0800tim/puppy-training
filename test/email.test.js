@@ -179,6 +179,24 @@ test("sign-up email mentions the families the address already runs; a suspended 
   assert.equal(app.mailer.outbox.length, 1, "no sign-in link for a paused family");
 });
 
+test("a sign-up with a missing field or a bad PIN spends none of the hour's links; names are one line in the email and the index", async () => {
+  const dir = tmp();
+  const app = await boot({ dataDir: dir, trustProxy: true });
+  const ip = { "cf-connecting-ip": "203.0.113.77" };
+  for (let i = 0; i < 4; i++) assert.equal((await app.call("POST", "/api/signup", { email: "sue@example.nz", puppy: "Pepper", name: "", pin: "123456" }, undefined, ip)).status, 400);
+  for (let i = 0; i < 4; i++) assert.equal((await app.call("POST", "/api/signup", { email: "sue@example.nz", puppy: "Pepper", name: "Sue", pin: "12" }, undefined, ip)).status, 400);
+  assert.equal(app.mailer.outbox.length, 0);
+  const r = await app.call("POST", "/api/signup", { email: "sue@example.nz", puppy: "Pep\nper\r\nSubject: x", name: "Sue\u0000", pin: "123456" }, undefined, ip);
+  assert.equal(r.status, 200, "the typos did not lock the address");
+  const mail = app.mailer.outbox[0];
+  assert.equal(mail.subject, "Start Pep per Subject: x's puppy school");
+  assert.match(mail.text, /^Hi Sue,\n/);
+  const [tok] = [...mail.text.matchAll(/\/m\/([A-Za-z0-9_.-]+)/g)].map((m) => m[1]);
+  const go = await app.call("POST", "/m/" + tok);
+  assert.equal(go.status, 302);
+  assert.equal(app.server.households.get(go.jar.pt_h).rec.name, "Pep per Subject: x");
+});
+
 test("the single-family server has none of this", async () => {
   const dir = tmp();
   const server = createApp({ log: () => {}, noScheduler: true, dataDir: dir, pin: "123456" });

@@ -189,6 +189,48 @@ test("a demo family: made in one tap, seeded, signed in as the grown-up, no remi
   assert.equal(b.server.households.list().length, 0, "every demo gone at boot once old enough");
 });
 
+test("a phone whose family is gone gets the welcome screen, not the carried-over family's PIN screen; the dead pt_h is dropped", async () => {
+  const dir = tmp();
+  let clock = Date.now();
+  const app = await boot({ dataDir: dir, trustProxy: true, now: () => clock });
+  // the carried-over family, as on a server that switched HOUSEHOLDS=1 on with a store in place
+  app.server.households.create({ id: "default", name: "Jolene", pin: "222222" });
+  // a demo phone, a day later
+  const d = await app.call("POST", "/api/demo", {}, undefined, ipOf(21));
+  assert.equal(d.status, 200);
+  clock += 25 * 3600e3;
+  assert.deepEqual(app.server.households.sweep(), [d.jar.pt_h]);
+  const hh = await app.call("GET", "/api/household", undefined, jarCookie(d.jar));
+  assert.equal(hh.json.code, null, "not Jolene's code"); assert.equal(hh.json.name, "");
+  assert.ok(hh.jar.pt_h === "", "dead household pointer cleared: " + JSON.stringify(hh.jar));
+  const st = await app.call("GET", "/api/state", undefined, jarCookie(d.jar));
+  assert.equal(st.status, 401); assert.equal(st.json.code, "household");
+  // a family the owner deleted, after the grace period, with only its session and me cookies left
+  const made = app.server.households.create({ name: "Pepper", pin: "333333" });
+  const j = await app.call("GET", "/j/" + made.code);
+  const li = await app.call("POST", "/api/login", { pin: "333333" }, "pt_h=" + j.jar.pt_h);
+  const ck = await ownerSignIn(app);
+  assert.equal((await app.call("DELETE", "/api/owner/households/" + made.id, undefined, ck)).status, 200);
+  clock += 8 * 864e5;
+  assert.deepEqual(app.server.households.sweep(), [made.id]);
+  const gone = await app.call("GET", "/api/household", undefined, "pt_session=" + li.jar.pt_session);
+  assert.equal(gone.json.code, null);
+  assert.equal((await app.call("GET", "/api/state", undefined, "pt_session=" + li.jar.pt_session)).status, 401);
+  // the family that was here before still works for its own phones: old cookies name no household, a bare PIN lands in it
+  assert.equal((await app.call("GET", "/api/household", undefined, "pt_h=default")).json.name, "Jolene");
+  assert.equal((await app.call("POST", "/api/login", { pin: "222222" })).status, 200);
+});
+
+test("at most a few sample families live at once: beyond the cap the button says try again tomorrow", async () => {
+  const dir = tmp();
+  const app = await boot({ dataDir: dir, trustProxy: true, limits: { perIp: 50, global: 500, demoMax: 2 } });
+  assert.equal((await app.call("POST", "/api/demo", {}, undefined, ipOf(31))).status, 200);
+  assert.equal((await app.call("POST", "/api/demo", {}, undefined, ipOf(32))).status, 200);
+  const r = await app.call("POST", "/api/demo", {}, undefined, ipOf(33));
+  assert.equal(r.status, 503); assert.match(r.json.error, /tomorrow/);
+  assert.equal(app.server.households.list().length, 2);
+});
+
 test("the single-family server has no owner page, no demo and no delete", async () => {
   const server = createApp({ log: () => {}, noScheduler: true, dataDir: tmp(), pin: "123456", ownerEmails: "tim@example.nz" });
   await new Promise((r) => server.listen(0, "127.0.0.1", r)); servers.push(server);

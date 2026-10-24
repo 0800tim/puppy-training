@@ -184,3 +184,46 @@ it in Sheets: the cell should read `'=1+1` as text.
 | # | Finding | Severity | Fix on `sec/client-ip` |
 |---|---|---|---|
 | 10 | **With `TRUST_PROXY=1` the server took the first `X-Forwarded-For` entry as the visitor's address.** That entry is whatever the phone sent. Cloudflare's documented behaviour (developers.cloudflare.com, "HTTP request headers") is to *append* the connecting address to an `X-Forwarded-For` the client already sent, and cloudflared does the same (cloudflare/cloudflared issue 1426 shows `X-Forwarded-For: a,b,c,…,203.0.113.1` reaching the origin with `Cf-Connecting-Ip: 203.0.113.1`). So one phone could dodge the per-address PIN lockout by changing the header each try, and the log recorded made-up addresses. The global cap of 20 wrong PINs an hour still held. | Medium | `clientIp()` now reads `CF-Connecting-IP` first (one address, set only by the edge, which Cloudflare recommends over `X-Forwarded-For`), then the *last* `X-Forwarded-For` hop for other proxies, then the socket. Values that are not IP addresses are ignored. Without `TRUST_PROXY` both headers are ignored as before. Tests: a phone rewriting the first entry is still locked out, the log carries the edge's address, junk headers fall back to the socket, and with the flag off the headers do nothing. Also fixed: `createApp({ trustProxy: true })` was read as off (only the string "1" counted), which is why no test had exercised the proxy path. |
+
+### Added 24 October 2026: households steps 3 and 4 (links by email, the owner page, demo families)
+
+A fresh-eyes pass over `feat/households-email` and `feat/households-owner`
+(main c8a7195): the signed links, the pending and spent lists in
+`households.json`, the owner cookie and routes, demo creation, deletion and
+the sweeper, `public/owner.js` and `public/m.js`. Fixes on
+`sec/households-review`, 80 tests.
+
+| # | Finding | Severity | Fix |
+|---|---|---|---|
+| 11 | **A phone whose family is gone fell through to the carried-over family.** `resolveHousehold` falls back to household `default` when no cookie names a live family, which is right for phones from before `HOUSEHOLDS=1` (their cookies name no household). But a phone whose `pt_h` or session named a family the sweeper has removed (a demo past its day, or a deleted family after the grace period) took the same path, and the welcome-screen rule only looked for phones with no cookies at all. On dev, anyone shown a sample family saw the real family's PIN screen the next day, with its name and code. The PIN still protected the chart; the lockout counters applied. | Medium | A cookie that names a family not on the server now counts as no family: `GET /api/household` answers with no code or name, `GET /api/state` says 401 "Which family?", and the dead `pt_h` is cleared on both so a join link or sign-up starts clean. Cookies from before `HOUSEHOLDS=1` still land in `default`, and so does a PIN typed with no cookies. Test in `test/owner.test.js`. |
+| 12 | **No cap on live sample families.** `POST /api/demo` was limited to three an hour per address, but each demo is a folder, an open store and an entry in memory, and addresses are cheap. | Low | At most `limits.demoMax` (20) demo families alive at once; beyond that the button gets 503 "try again tomorrow". Pending sign-ups are capped the same way at `limits.pendingMax` (500); each is a few hundred bytes and a scrypt hash. Test. |
+| 13 | **A sign-up typo spent one of the hour's three links.** The per-address and per-phone counters were taken before the puppy's name, the grown-up's name and the PIN were checked, so three mistakes locked the address for an hour with no email sent. | Low | Fields are checked first; only a request that will send mail counts. Test. |
+| 14 | **Names reached email subjects and page titles with control characters in them.** The puppy's name and the grown-up's name are user text; a newline in the puppy's name put a second line into the "Start X's puppy school" subject and the greeting. SendGrid takes JSON, so no header could be injected, and the link page escapes HTML, but a crafted subject still looks wrong in an inbox. | Low | `plain()` folds control characters to a space on every name that enters the index or an email (sign-up, the owner's make-a-family form, `createHousehold`). Test. |
+| 15 | **Links take the request's Host header when `APP_URL` is unset.** Behind the Cloudflare tunnel the edge only forwards requests whose Host matches the zone, so a forged Host cannot reach the origin that way, but a server reached directly, or behind a plainer proxy, would put an attacker's address into a sign-in email. | Low here, Medium elsewhere | README and the env example now say to set `APP_URL` on any public server, and the server logs a warning at boot in households mode without it. Needs Tim: add `APP_URL=https://puppy.appspurt.dev` to the dev `.env` (and the matching value to prod when it goes multi) and restart the unit. |
+
+Accepted, by design, noted so nobody rediscovers them:
+
+- `pt_h` is a pointer, not a credential, and `default` is a guessable id.
+  Setting `pt_h=default` by hand returns the carried-over family's name and
+  code from `GET /api/household`. The code only leads to that family's PIN
+  screen, which a cookieless phone reaches anyway (a PIN typed with no
+  cookies lands in `default`), and the name is the puppy's. Other ids are 40
+  random bits.
+- The link page posts itself after 300 ms. A mail scanner that runs scripts
+  could spend a link; the person then asks for another. Scanners that only
+  fetch do not.
+- A grown-up can put any address on their own row, so that address's next
+  sign-in email lists their family too. The address owner is not harmed
+  beyond an extra link; the family named is the grown-up's own.
+- A sign-in link stays good for its 15 minutes even if the row's email is
+  changed or the person removed in between; opening it with a removed person
+  bounces, a changed email does not.
+- `DELETE /api/household` by any grown-up when the family has no owner
+  address (families the owner page made without one). The owner page can undo
+  for seven days.
+- The sweeper removes a folder while a request on that family could still be
+  in flight; that request fails with a 500 once, and the phone's next request
+  gets the welcome screen.
+
+Not fixed, not Tim-free: the visual pass of the welcome, sign-up, sign-in,
+check-your-email and owner screens needs a browser.

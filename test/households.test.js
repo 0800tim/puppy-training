@@ -54,7 +54,9 @@ test("two households: own PINs, own stores, own folders, and neither can see or 
   assert.match(A.code, /^biscuit-[23456789a-z]{4}$/); assert.match(B.code, /^rolo-[23456789a-z]{4}$/);
   assert.ok(A.id !== B.id);
   const index = fs.readFileSync(path.join(dir, "households.json"), "utf8");
-  assert.ok(!index.includes("111111") && !index.includes("222222") && !index.includes("4321"), "no PIN in the index file");
+  // the PIN fields hold scrypt hashes; the file as a whole is not searched for the digits, a timestamp or a hex salt can contain them by chance
+  JSON.parse(index).households.forEach((r) => { assert.match(r.pin, /^scrypt\$[0-9a-f]{32}\$[0-9a-f]{64}$/); if (r.adultPin) assert.match(r.adultPin, /^scrypt\$/); });
+  assert.ok(!/"(pin|adultPin)": ?"(111111|222222|4321)"/.test(index), "no PIN in the index file");
   assert.ok(index.includes("ann@example.nz"));
 
   // the join link puts a phone in a family; a wrong code says so
