@@ -4,7 +4,19 @@ Design note, 22 October 2026. Written from the code at main 521aaaa, after
 Tim asked how another family could register, whether an adult could manage
 their own kids and puppy photo, and whether that means "a proper standard
 login rather than just a PIN". This describes a design and a build order.
-No code changes come with it.
+No code changes came with it.
+
+**Where it stands, 24 October 2026.** All five steps were built on 22
+October and run on the dev slot (puppy.appspurt.dev, `HOUSEHOLDS=1`, the
+console mail sender, `OWNER_EMAILS` set); stable and demo stay
+single-family until Tim has tested dev. The step 5 docs sweep happened
+inside steps 3 and 4 rather than on its own branch. Since then, on
+branches that wait for Tim: a security and correctness review of steps 3
+and 4 (`sec/households-review`), fixes to the client screens
+(`ui/households-client`), the join link as a QR code (`feat/join-qr`,
+listed under step 2 below and built last), lockouts that survive a
+restart (`feat/lockouts-persist`) and log rotation (`ops/logrotate`).
+What still needs Tim is in `docs/NEEDS-TIM-2026-10.md`, items 18 to 24.
 
 Short answer: yes to a proper login for the grown-up who sets a family up,
 and no to logins for kids. The family PIN stays as the kids' door. The
@@ -258,7 +270,7 @@ join link and a PIN he set on the owner page, which is the "eight litter
 families" case with no email at all. Step 3 is what makes it
 self-service.
 
-## Needs Tim before step 3
+## Needs Tim before step 3 (items 1 and 2 still open on 24 October as NEEDS-TIM 18 and 19; 3 was settled by building)
 
 1. The sender address for magic links (`hello@appspurt.com`, or a new
    `puppy@` on the domain) and whether to authenticate the domain in
